@@ -6,7 +6,8 @@
  * completions format and Perplexity's internal protocol.
  */
 
-import { BaseExecutor, type ExecuteInput } from "./base.ts";
+import { BaseExecutor, mergeUpstreamExtraHeaders, mergeAbortSignals, type ExecuteInput } from "./base.ts";
+import { FETCH_TIMEOUT_MS } from "../config/constants.ts";
 
 const PPLX_SSE_ENDPOINT = "https://www.perplexity.ai/rest/sse/perplexity_ask";
 const PPLX_API_VERSION = "2.18";
@@ -88,14 +89,7 @@ function sessionStore(
   const key = sessionKey(full);
   sessionCache.set(key, { backendUuid, ts: Date.now() });
   if (sessionCache.size > SESSION_MAX_ENTRIES) {
-    let oldestKey: string | null = null;
-    let oldestTs = Infinity;
-    for (const [k, v] of sessionCache) {
-      if (v.ts < oldestTs) {
-        oldestTs = v.ts;
-        oldestKey = k;
-      }
-    }
+    const oldestKey = sessionCache.keys().next().value;
     if (oldestKey) sessionCache.delete(oldestKey);
   }
 }
@@ -112,8 +106,6 @@ function cleanResponse(text: string, strip = true): string {
   t = t.replace(SCRIPT_RE, "");
   t = t.replace(SCRIPT_TAG_RE, "");
   if (strip) {
-    t = t.replace(MULTI_SPACE, " ");
-    t = t.replace(MULTI_NL, "\n\n");
     t = t.trim();
   }
   return t;
@@ -311,8 +303,11 @@ function buildQuery(parsed: ParsedMessages, followUpUuid: string | null): string
   } else if (parsed.history.length === 0) {
     obj.query = "";
   }
-  const json = JSON.stringify(obj);
-  return json.length > 96000 ? json.slice(-96000) : json;
+  // Truncate by removing oldest history entries to stay within Perplexity limits
+  while (JSON.stringify(obj).length > 96000 && Array.isArray(obj.history) && (obj.history as unknown[]).length > 0) {
+    (obj.history as unknown[]).shift();
+  }
+  return JSON.stringify(obj);
 }
 
 // ─── Content extraction ─────────────────────────────────────────────────────
@@ -391,7 +386,15 @@ async function* extractContent(
       if (chunks.length === 0) continue;
 
       if (mb.progress === "DONE") {
-        fullAnswer = chunks.join("");
+        const doneText = chunks.join("");
+        if (doneText.length > seenLen) {
+          const delta = doneText.slice(seenLen);
+          fullAnswer = doneText;
+          seenLen = doneText.length;
+          yield { delta, answer: fullAnswer, backendUuid: backendUuid ?? undefined };
+        } else {
+          fullAnswer = doneText;
+        }
       } else {
         const chunkText = chunks.join("");
         const cumulative = fullAnswer + chunkText;
@@ -653,7 +656,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
     super("perplexity-web", { id: "perplexity-web", baseUrl: PPLX_SSE_ENDPOINT });
   }
 
-  async execute({ model, body, stream, credentials, signal, log }: ExecuteInput) {
+  async execute({ model, body, stream, credentials, signal, log, upstreamExtraHeaders }: ExecuteInput) {
     const messages = (body as Record<string, unknown>).messages as
       | Array<Record<string, unknown>>
       | undefined;
@@ -729,13 +732,20 @@ export class PerplexityWebExecutor extends BaseExecutor {
       `Query to ${model} (pref=${modelPref}, mode=${pplxMode}), len=${query.length}`,
     );
 
+    // Apply upstream extra headers
+    mergeUpstreamExtraHeaders(headers, upstreamExtraHeaders);
+
+    // Apply fetch timeout (matching BaseExecutor behavior)
+    const timeoutSignal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const combinedSignal = signal ? mergeAbortSignals(signal, timeoutSignal) : timeoutSignal;
+
     // Fetch from Perplexity
     const fetchOptions: RequestInit = {
       method: "POST",
       headers,
       body: JSON.stringify(pplxBody),
+      signal: combinedSignal,
     };
-    if (signal) fetchOptions.signal = signal;
 
     let response: Response;
     try {
