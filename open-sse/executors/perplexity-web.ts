@@ -6,7 +6,12 @@
  * completions format and Perplexity's internal protocol.
  */
 
-import { BaseExecutor, mergeUpstreamExtraHeaders, mergeAbortSignals, type ExecuteInput } from "./base.ts";
+import {
+  BaseExecutor,
+  mergeUpstreamExtraHeaders,
+  mergeAbortSignals,
+  type ExecuteInput,
+} from "./base.ts";
 import { FETCH_TIMEOUT_MS } from "../config/constants.ts";
 
 const PPLX_SSE_ENDPOINT = "https://www.perplexity.ai/rest/sse/perplexity_ask";
@@ -52,19 +57,26 @@ interface SessionEntry {
 
 const sessionCache = new Map<string, SessionEntry>();
 
-function sessionKey(history: Array<{ role: string; content: string }>): string {
+function sessionKey(
+  history: Array<{ role: string; content: string }>,
+  credentialKey: string
+): string {
   const parts = history.map((h) => `${h.role}:${h.content}`).join("\n");
+  const combined = `${credentialKey}||${parts}`;
   let hash = 0x811c9dc5;
-  for (let i = 0; i < parts.length; i++) {
-    hash ^= parts.charCodeAt(i);
+  for (let i = 0; i < combined.length; i++) {
+    hash ^= combined.charCodeAt(i);
     hash = (hash * 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, "0");
 }
 
-function sessionLookup(history: Array<{ role: string; content: string }>): string | null {
+function sessionLookup(
+  history: Array<{ role: string; content: string }>,
+  credentialKey: string
+): string | null {
   if (history.length === 0) return null;
-  const key = sessionKey(history);
+  const key = sessionKey(history, credentialKey);
   const entry = sessionCache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.ts > SESSION_MAX_AGE_MS) {
@@ -79,6 +91,7 @@ function sessionStore(
   currentMsg: string,
   responseText: string,
   backendUuid: string | null,
+  credentialKey: string
 ): void {
   if (!backendUuid) return;
   const full = [
@@ -86,7 +99,7 @@ function sessionStore(
     { role: "user", content: currentMsg },
     { role: "assistant", content: responseText },
   ];
-  const key = sessionKey(full);
+  const key = sessionKey(full, credentialKey);
   sessionCache.set(key, { backendUuid, ts: Date.now() });
   if (sessionCache.size > SESSION_MAX_ENTRIES) {
     const oldestKey = sessionCache.keys().next().value;
@@ -150,7 +163,7 @@ interface PplxStreamEvent {
 
 async function* readPplxSseEvents(
   body: ReadableStream<Uint8Array>,
-  signal?: AbortSignal | null,
+  signal?: AbortSignal | null
 ): AsyncGenerator<PplxStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -256,12 +269,9 @@ function buildPplxRequestBody(
   query: string,
   mode: string,
   modelPref: string,
-  followUpUuid: string | null,
+  followUpUuid: string | null
 ): Record<string, unknown> {
-  const tz =
-    typeof Intl !== "undefined"
-      ? Intl.DateTimeFormat().resolvedOptions().timeZone
-      : "UTC";
+  const tz = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
 
   return {
     query_str: query,
@@ -304,7 +314,11 @@ function buildQuery(parsed: ParsedMessages, followUpUuid: string | null): string
     obj.query = "";
   }
   // Truncate by removing oldest history entries to stay within Perplexity limits
-  while (JSON.stringify(obj).length > 96000 && Array.isArray(obj.history) && (obj.history as unknown[]).length > 0) {
+  while (
+    JSON.stringify(obj).length > 96000 &&
+    Array.isArray(obj.history) &&
+    (obj.history as unknown[]).length > 0
+  ) {
     (obj.history as unknown[]).shift();
   }
   return JSON.stringify(obj);
@@ -323,7 +337,7 @@ interface ContentChunk {
 
 async function* extractContent(
   eventStream: ReadableStream<Uint8Array>,
-  signal?: AbortSignal | null,
+  signal?: AbortSignal | null
 ): AsyncGenerator<ContentChunk> {
   let fullAnswer = "";
   let backendUuid: string | null = null;
@@ -437,7 +451,8 @@ function buildStreamingResponse(
   created: number,
   history: Array<{ role: string; content: string }>,
   currentMsg: string,
-  signal?: AbortSignal | null,
+  credentialKey: string,
+  signal?: AbortSignal | null
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
@@ -456,8 +471,8 @@ function buildStreamingResponse(
               choices: [
                 { index: 0, delta: { role: "assistant" }, finish_reason: null, logprobs: null },
               ],
-            }),
-          ),
+            })
+          )
         );
 
         let fullAnswer = "";
@@ -483,8 +498,8 @@ function buildStreamingResponse(
                       logprobs: null,
                     },
                   ],
-                }),
-              ),
+                })
+              )
             );
             break;
           }
@@ -506,8 +521,8 @@ function buildStreamingResponse(
                       logprobs: null,
                     },
                   ],
-                }),
-              ),
+                })
+              )
             );
             continue;
           }
@@ -532,8 +547,8 @@ function buildStreamingResponse(
                     choices: [
                       { index: 0, delta: { content: dt }, finish_reason: null, logprobs: null },
                     ],
-                  }),
-                ),
+                  })
+                )
               );
             }
           }
@@ -550,12 +565,18 @@ function buildStreamingResponse(
               model,
               system_fingerprint: null,
               choices: [{ index: 0, delta: {}, finish_reason: "stop", logprobs: null }],
-            }),
-          ),
+            })
+          )
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 
-        sessionStore(history, currentMsg, cleanResponse(fullAnswer), respBackendUuid);
+        sessionStore(
+          history,
+          currentMsg,
+          cleanResponse(fullAnswer),
+          respBackendUuid,
+          credentialKey
+        );
       } catch (err) {
         controller.enqueue(
           encoder.encode(
@@ -575,8 +596,8 @@ function buildStreamingResponse(
                   logprobs: null,
                 },
               ],
-            }),
-          ),
+            })
+          )
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } finally {
@@ -593,7 +614,8 @@ async function buildNonStreamingResponse(
   created: number,
   history: Array<{ role: string; content: string }>,
   currentMsg: string,
-  signal?: AbortSignal | null,
+  credentialKey: string,
+  signal?: AbortSignal | null
 ): Promise<Response> {
   let fullAnswer = "";
   let respBackendUuid: string | null = null;
@@ -606,7 +628,7 @@ async function buildNonStreamingResponse(
         JSON.stringify({
           error: { message: chunk.error, type: "upstream_error", code: "PPLX_ERROR" },
         }),
-        { status: 502, headers: { "Content-Type": "application/json" } },
+        { status: 502, headers: { "Content-Type": "application/json" } }
       );
     }
     if (chunk.thinking) {
@@ -621,10 +643,9 @@ async function buildNonStreamingResponse(
   }
 
   fullAnswer = cleanResponse(fullAnswer);
-  sessionStore(history, currentMsg, fullAnswer, respBackendUuid);
+  sessionStore(history, currentMsg, fullAnswer, respBackendUuid, credentialKey);
 
-  const reasoningContent =
-    thinkingParts.length > 0 ? thinkingParts.join("\n") : undefined;
+  const reasoningContent = thinkingParts.length > 0 ? thinkingParts.join("\n") : undefined;
   const msg: Record<string, unknown> = { role: "assistant", content: fullAnswer };
   if (reasoningContent) msg.reasoning_content = reasoningContent;
 
@@ -645,7 +666,7 @@ async function buildNonStreamingResponse(
         total_tokens: promptTokens + completionTokens,
       },
     }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
+    { status: 200, headers: { "Content-Type": "application/json" } }
   );
 }
 
@@ -656,7 +677,15 @@ export class PerplexityWebExecutor extends BaseExecutor {
     super("perplexity-web", { id: "perplexity-web", baseUrl: PPLX_SSE_ENDPOINT });
   }
 
-  async execute({ model, body, stream, credentials, signal, log, upstreamExtraHeaders }: ExecuteInput) {
+  async execute({
+    model,
+    body,
+    stream,
+    credentials,
+    signal,
+    log,
+    upstreamExtraHeaders,
+  }: ExecuteInput) {
     const messages = (body as Record<string, unknown>).messages as
       | Array<Record<string, unknown>>
       | undefined;
@@ -665,7 +694,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
         JSON.stringify({
           error: { message: "Missing or empty messages array", type: "invalid_request" },
         }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
       return { response: errResp, url: PPLX_SSE_ENDPOINT, headers: {}, transformedBody: body };
     }
@@ -692,7 +721,9 @@ export class PerplexityWebExecutor extends BaseExecutor {
 
     // Parse messages and check session continuity
     const parsed = parseOpenAIMessages(messages);
-    const followUpUuid = sessionLookup(parsed.history);
+    const credentialKey =
+      credentials.connectionId || credentials.apiKey || credentials.accessToken || "";
+    const followUpUuid = sessionLookup(parsed.history, credentialKey);
     if (followUpUuid) {
       log?.info?.("PPLX-WEB", `Session continue: ${followUpUuid.slice(0, 12)}...`);
     }
@@ -703,7 +734,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
         JSON.stringify({
           error: { message: "Empty query after processing", type: "invalid_request" },
         }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
       return { response: errResp, url: PPLX_SSE_ENDPOINT, headers: {}, transformedBody: body };
     }
@@ -729,7 +760,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
 
     log?.info?.(
       "PPLX-WEB",
-      `Query to ${model} (pref=${modelPref}, mode=${pplxMode}), len=${query.length}`,
+      `Query to ${model} (pref=${modelPref}, mode=${pplxMode}), len=${query.length}`
     );
 
     // Apply upstream extra headers
@@ -751,10 +782,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
     try {
       response = await fetch(PPLX_SSE_ENDPOINT, fetchOptions);
     } catch (err) {
-      log?.error?.(
-        "PPLX-WEB",
-        `Fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      log?.error?.("PPLX-WEB", `Fetch failed: ${err instanceof Error ? err.message : String(err)}`);
       const errResp = new Response(
         JSON.stringify({
           error: {
@@ -762,7 +790,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
             type: "upstream_error",
           },
         }),
-        { status: 502, headers: { "Content-Type": "application/json" } },
+        { status: 502, headers: { "Content-Type": "application/json" } }
       );
       return { response: errResp, url: PPLX_SSE_ENDPOINT, headers, transformedBody: pplxBody };
     }
@@ -781,7 +809,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
         JSON.stringify({
           error: { message: errMsg, type: "upstream_error", code: `HTTP_${status}` },
         }),
-        { status, headers: { "Content-Type": "application/json" } },
+        { status, headers: { "Content-Type": "application/json" } }
       );
       return { response: errResp, url: PPLX_SSE_ENDPOINT, headers, transformedBody: pplxBody };
     }
@@ -791,7 +819,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
         JSON.stringify({
           error: { message: "Perplexity returned empty response body", type: "upstream_error" },
         }),
-        { status: 502, headers: { "Content-Type": "application/json" } },
+        { status: 502, headers: { "Content-Type": "application/json" } }
       );
       return { response: errResp, url: PPLX_SSE_ENDPOINT, headers, transformedBody: pplxBody };
     }
@@ -809,7 +837,8 @@ export class PerplexityWebExecutor extends BaseExecutor {
         created,
         parsed.history,
         parsed.currentMsg,
-        signal,
+        credentialKey,
+        signal
       );
       finalResponse = new Response(sseStream, {
         status: 200,
@@ -827,7 +856,8 @@ export class PerplexityWebExecutor extends BaseExecutor {
         created,
         parsed.history,
         parsed.currentMsg,
-        signal,
+        credentialKey,
+        signal
       );
     }
 

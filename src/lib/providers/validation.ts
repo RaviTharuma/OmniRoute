@@ -1054,6 +1054,72 @@ export async function validateProviderApiKey({ provider, apiKey, providerSpecifi
         return { valid: false, error: error.message || "Connection failed" };
       }
     },
+    // Perplexity Web — validates cookie auth (session token) instead of Bearer token
+    "perplexity-web": async ({ apiKey }: any) => {
+      try {
+        const tz =
+          typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+        const testBody = {
+          query_str: "test",
+          params: {
+            query_str: "test",
+            search_focus: "internet",
+            mode: "concise",
+            model_preference: "pplx_pro",
+            sources: ["web"],
+            attachments: [],
+            frontend_uuid: crypto.randomUUID(),
+            frontend_context_uuid: crypto.randomUUID(),
+            version: "2.18",
+            language: "en-US",
+            timezone: tz,
+            search_recency_filter: null,
+            is_incognito: true,
+            use_schematized_api: true,
+            last_backend_uuid: null,
+          },
+        };
+        const res = await fetch("https://www.perplexity.ai/rest/sse/perplexity_ask", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Origin: "https://www.perplexity.ai",
+            Referer: "https://www.perplexity.ai/",
+            "User-Agent":
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "X-App-ApiClient": "default",
+            "X-App-ApiVersion": "2.18",
+            Cookie: `__Secure-next-auth.session-token=${apiKey}`,
+          },
+          body: JSON.stringify(testBody),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.status === 401 || res.status === 403) {
+          return {
+            valid: false,
+            error:
+              "Invalid or expired session token. Get a fresh __Secure-next-auth.session-token from perplexity.ai",
+          };
+        }
+        if (res.status === 429) {
+          return { valid: false, error: "Rate limited. Wait and retry." };
+        }
+        // Any 2xx or non-auth 4xx means cookie was accepted
+        if (
+          res.ok ||
+          (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 403)
+        ) {
+          return { valid: true, error: null };
+        }
+        return { valid: false, error: `HTTP ${res.status}` };
+      } catch (error: any) {
+        if (error.name === "TimeoutError" || error.name === "AbortError") {
+          return { valid: false, error: "Validation request timed out" };
+        }
+        return { valid: false, error: error.message || "Connection failed" };
+      }
+    },
     // Search providers — use factored validator
     ...Object.fromEntries(
       Object.entries(SEARCH_VALIDATOR_CONFIGS).map(([id, configFn]) => [
