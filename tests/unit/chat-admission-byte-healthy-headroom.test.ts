@@ -81,8 +81,7 @@ test("byte-heavy admitChatRequest: a pressured heap still 503s the second concur
 
 test("OMNIROUTE_CHAT_LARGE_BODY_BYTES default threshold takes the heavyweight lease and healthy-headroom", async () => {
   const controller = new ChatAdmissionController(1, undefined, 1);
-  const pad = Math.max(1, CHAT_LARGE_BODY_BYTES - 80);
-  const body = byteHeavyBody(pad);
+  const body = byteHeavyBody(CHAT_LARGE_BODY_BYTES);
   assert.ok(
     body.length >= CHAT_LARGE_BODY_BYTES,
     "fixture must sit at or above the default LARGE_BODY_BYTES threshold"
