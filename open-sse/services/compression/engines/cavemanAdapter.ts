@@ -336,7 +336,7 @@ export const cavemanEngine: CompressionEngine = {
       ...(options?.config?.preserveSystemPrompt !== false
         ? {
             compressRoles: (options?.config?.cavemanConfig?.compressRoles ?? ["user"]).filter(
-              (role) => role !== "system"
+              (role) => role !== "system" && role !== "developer"
             ),
           }
         : {}),
