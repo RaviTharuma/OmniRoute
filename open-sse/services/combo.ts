@@ -265,6 +265,11 @@ import {
   startComboTrace,
 } from "./combo/decisionTrace.ts";
 import {
+  classifyComboSkipErrorClass,
+  resolveAllSkippedTerminal,
+  resolveAllSkippedTerminalFromTrace,
+} from "./combo/allSkippedTerminal.ts";
+import {
   QUOTA_SOFT_DEPRIORITIZE_FACTOR,
   setCandidateQuotaSoftPenalty,
   _registerExecutionCandidates,
@@ -1141,6 +1146,7 @@ async function handleComboChatInner({
       let fallbackCount = 0;
       let recordedAttempts = 0;
       comboErrors = [];
+      const extraSkipClasses: Array<string | null> = [];
 
       // QA P0: assemble a sanitized diagnostic trace from the state already in scope
       // (pool size + this set-try's exhausted providers/connections + attempt order +
@@ -1293,6 +1299,7 @@ async function handleComboChatInner({
           );
           if (persistedSkip) {
             log.info("COMBO", persistedSkip);
+            extraSkipClasses.push(classifyComboSkipErrorClass({ skipMessage: persistedSkip }));
             clearStaleLKGP(combo.name, target.executionKey, combo.id, log, "COMBO");
             if (i > 0) fallbackCount++;
             return null;
@@ -2715,7 +2722,11 @@ async function handleComboChatInner({
       // All set retries exhausted — return the final error
       // #10681: finalize the decision trace (all targets failed or skipped).
       finalizeComboTrace(traceInvocationId, orderedTargets);
-      finishComboTrace(traceInvocationId, { status: 503 });
+      const allSkipped = resolveAllSkippedTerminalFromTrace(
+        getComboTrace(traceInvocationId),
+        extraSkipClasses
+      );
+      finishComboTrace(traceInvocationId, { status: 503, errorClass: allSkipped.errorClass });
       if (!lastStatus) {
         if (recordedAttempts === 0) {
           notifyWebhookEvent("request.failed", {
@@ -2727,9 +2738,14 @@ async function handleComboChatInner({
           return withQuotaExhaustionClassification(
             errorResponseWithComboDiagnostics(
               503,
-              "Service temporarily unavailable: all targets were skipped by pre-dispatch filters",
+              allSkipped.message,
               buildComboDiag("all_targets_skipped"),
-              { code: "ALL_TARGETS_SKIPPED", type: "service_unavailable" }
+              {
+                code: "ALL_TARGETS_SKIPPED",
+                type: "service_unavailable",
+                errorClass: allSkipped.errorClass,
+                errorClasses: allSkipped.errorClasses,
+              }
             ),
             observedFailure ? allObservedFailuresQuota : null
           );
@@ -3209,6 +3225,7 @@ async function handleRoundRobinCombo({
   let globalAttempts = 0;
   let fallbackCount = 0;
   let recordedAttempts = 0;
+  const rrSkipClasses: string[] = [];
   // #11134: operator-configurable shared attempt budget (clamped to the hard
   // cap). Defaults to MAX_GLOBAL_ATTEMPTS when unset.
   const maxGlobalAttempts = clampGlobalAttempts(config.maxGlobalAttempts);
@@ -3278,6 +3295,7 @@ async function handleRoundRobinCombo({
             "COMBO-RR",
             `Skipping ${modelStr} — no credentials available or model excluded`
           );
+          rrSkipClasses.push("no_credentials");
           clearStaleLKGP(combo.name, target.executionKey, combo.id, log, "COMBO-RR");
           if (offset > 0) fallbackCount++;
           continue;
@@ -3933,13 +3951,15 @@ async function handleRoundRobinCombo({
 
   if (!lastStatus) {
     if (recordedAttempts === 0) {
+      const allSkipped = resolveAllSkippedTerminal(rrSkipClasses);
       return new Response(
         JSON.stringify({
           error: {
-            message:
-              "Service temporarily unavailable: all targets were skipped by pre-dispatch filters",
+            message: allSkipped.message,
             type: "service_unavailable",
             code: "ALL_TARGETS_SKIPPED",
+            errorClass: allSkipped.errorClass,
+            errorClasses: allSkipped.errorClasses,
           },
         }),
         { status: 503, headers: { "Content-Type": "application/json" } }

@@ -16,6 +16,8 @@ interface ErrorResponseBody {
     type?: string;
     code?: string;
     reason?: string;
+    errorClass?: string;
+    errorClasses?: string[];
   };
   upstream_details?: Record<string, unknown> | null; // sanitized upstream provider body
 }
@@ -110,6 +112,8 @@ export type ErrorBodyClassification = {
   type?: string;
   code?: string;
   reason?: string;
+  errorClass?: string;
+  errorClasses?: string[];
 };
 
 /**
@@ -135,6 +139,8 @@ export function buildErrorBody(
       type: classification?.type ?? errorInfo.type,
       code: classification?.code ?? errorInfo.code,
       reason: classification?.reason,
+      errorClass: classification?.errorClass,
+      errorClasses: classification?.errorClasses,
     },
   };
 
@@ -290,7 +296,7 @@ export function errorResponseWithComboDiagnostics(
   statusCode: number,
   message: string,
   diagnostics: ComboDiagnostics,
-  opts: { code?: string; type?: string } = {}
+  opts: { code?: string; type?: string; errorClass?: string; errorClasses?: string[] } = {}
 ): Response {
   const safe = sanitizeComboDiagnostics(diagnostics);
   const body = buildErrorBody(statusCode, message) as ErrorResponseBody & {
@@ -299,6 +305,10 @@ export function errorResponseWithComboDiagnostics(
   };
   if (opts.code) body.error.code = opts.code;
   if (opts.type) body.error.type = opts.type;
+  if (opts.errorClass) body.error.errorClass = opts.errorClass;
+  if (opts.errorClasses && opts.errorClasses.length > 0) {
+    body.error.errorClasses = opts.errorClasses;
+  }
   body.diagnostics = safe;
   if (safe.recovery) body.recovery_hint = safe.recovery;
   const excludedHeader = toHeaderSafeAscii(
