@@ -163,3 +163,46 @@ test("#10501: resolveComboTerminalStatus maps a heterogeneous mix containing a t
 test("#10501: resolveComboTerminalStatus falls back to the caller's status when there are no structured entries", () => {
   assert.equal(resolveComboTerminalStatus([], 503), 503);
 });
+
+test("local context overflow is a model 400, never a fake 408 timeout or 502", () => {
+  const overflow =
+    "Input exceeds context window for openai/gpt-5.6-codex: estimated 900000 input tokens, limit 872000.";
+  assert.equal(classifyComboOutcome(408, overflow), "model");
+  assert.equal(classifyComboOutcome(502, overflow), "model");
+  assert.equal(classifyComboOutcome(400, overflow), "model");
+  assert.equal(classifyComboOutcome(408, "request timeout"), "timeout");
+  assert.equal(classifyComboOutcome(502, "bad gateway"), "provider");
+
+  assert.equal(
+    resolveComboTerminalStatus(
+      [
+        {
+          model: "openai/gpt-5.6-codex",
+          status: 502,
+          error: overflow,
+          kind: "provider",
+        },
+        {
+          model: "openai/gpt-5.6-codex",
+          status: 408,
+          error: "context_length_exceeded",
+          kind: "timeout",
+        },
+      ],
+      502
+    ),
+    400
+  );
+
+  assert.equal(
+    resolveComboTerminalStatus(
+      [
+        { model: "a", status: 408, error: overflow, kind: "model" },
+        { model: "b", status: 408, error: "request timeout", kind: "timeout" },
+      ],
+      400
+    ),
+    504,
+    "a real timeout sibling still maps a heterogeneous mix to 504"
+  );
+});

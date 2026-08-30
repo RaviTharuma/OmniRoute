@@ -18,6 +18,7 @@ import {
   stripEmptyOptionalToolArgs,
   normalizeOutputIndex,
   normalizeUpstreamFailure,
+  isLocalContextOverflow,
   getVisibleResponsesReasoningSummaryText,
 } from "./openai-responses/pureHelpers.ts";
 import { createEventEmitter } from "./openai-responses/eventEmitter.ts";
@@ -155,17 +156,33 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
     // Gemini-to-OpenAI translator's #4177 fix).
     if (chunk.error && typeof chunk.error === "object") {
       const rawCode = chunk.error.code;
+      const overflow = isLocalContextOverflow({
+        code: typeof rawCode === "string" ? rawCode : "",
+        type: typeof chunk.error.type === "string" ? chunk.error.type : "",
+        message: typeof chunk.error.message === "string" ? chunk.error.message : "",
+      });
       const status =
-        typeof rawCode === "number" && rawCode >= 400 && rawCode <= 599 ? rawCode : 502;
+        typeof rawCode === "number" && rawCode >= 400 && rawCode <= 599
+          ? rawCode
+          : overflow
+            ? 400
+            : 502;
       state.upstreamError = {
         status,
-        type: status === 429 ? "rate_limit_error" : "server_error",
+        type:
+          status === 429
+            ? "rate_limit_error"
+            : overflow
+              ? "invalid_request_error"
+              : "server_error",
         code:
           typeof chunk.error.metadata?.error_type === "string"
             ? chunk.error.metadata.error_type
             : status === 429
               ? "rate_limit_exceeded"
-              : "bad_gateway",
+              : overflow
+                ? "context_length_exceeded"
+                : "bad_gateway",
         message: typeof chunk.error.message === "string" ? chunk.error.message : "Upstream failure",
       };
       return [];

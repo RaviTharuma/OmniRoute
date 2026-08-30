@@ -212,7 +212,8 @@ export function normalizeUpstreamFailure(data: unknown, fallbackType = "server_e
   // - context_length_exceeded → 400 (client can retry with smaller context)
   // - rate_limit_exceeded → 429 (client should back off)
   // - Everything else → 502 (upstream failure)
-  const isContextOverflow = code === "context_length_exceeded";
+  const errorType = typeof error?.type === "string" ? error.type : "";
+  const isContextOverflow = isLocalContextOverflow({ code, type: errorType, message });
   const isRateLimit = code === "rate_limit_exceeded" || code === "rate_limited";
   let status: number;
   let type: string;
@@ -230,9 +231,40 @@ export function normalizeUpstreamFailure(data: unknown, fallbackType = "server_e
   return {
     status,
     type,
-    code: code || (isRateLimit ? "rate_limit_exceeded" : "bad_gateway"),
+    code:
+      code ||
+      (isRateLimit
+        ? "rate_limit_exceeded"
+        : isContextOverflow
+          ? "context_length_exceeded"
+          : "bad_gateway"),
     message,
   };
+}
+
+/** Local/upstream overflow must stay 400 + context_length_exceeded, never 502/408. */
+export function isLocalContextOverflow(input: {
+  code?: string | null;
+  type?: string | null;
+  message?: string | null;
+}): boolean {
+  const code = String(input.code || "").toLowerCase();
+  const type = String(input.type || "").toLowerCase();
+  if (
+    code === "context_length_exceeded" ||
+    code === "context_window_exceeded" ||
+    type === "context_length_exceeded" ||
+    type === "context_window_exceeded"
+  ) {
+    return true;
+  }
+  const text = String(input.message || "");
+  return (
+    /context_length_exceeded|context_window_exceeded/i.test(text) ||
+    /exceeds(?:\s+\w+){0,4}\s+context/i.test(text) ||
+    /\bcontext window\b/i.test(text) ||
+    /\bmaximum input tokens\b/i.test(text)
+  );
 }
 
 export function extractResponsesReasoningSummaryText(item: unknown): string {

@@ -1,0 +1,1 @@
+- **fix(api):** local `context_length_exceeded` stays HTTP 400 on Responses and combo paths — message-only overflow is no longer remapped to 502 or a fake HTTP 408 ([#10225](https://github.com/diegosouzapw/OmniRoute/issues/10225), [#10503](https://github.com/diegosouzapw/OmniRoute/issues/10503)).
