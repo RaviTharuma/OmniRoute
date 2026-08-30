@@ -46,13 +46,13 @@ test("DOCKER_GUIDE documents the one-process long /v1/responses recipe (healthy-
 test("ENVIRONMENT.md documents LARGE_BODY_BYTES healthy-headroom and no hard max-2", () => {
   const large = envDoc
     .split("\n")
-    .find((line) => line.includes("`OMNIROUTE_CHAT_LARGE_BODY_BYTES`"));
+    .find((line) => line.startsWith("| `OMNIROUTE_CHAT_LARGE_BODY_BYTES`"));
   const heavy = envDoc
     .split("\n")
-    .find((line) => line.includes("`OMNIROUTE_CHAT_MAX_HEAVY_IN_FLIGHT`"));
+    .find((line) => line.startsWith("| `OMNIROUTE_CHAT_MAX_HEAVY_IN_FLIGHT`"));
   const headroom = envDoc
     .split("\n")
-    .find((line) => line.includes("`OMNIROUTE_CHAT_ADMISSION_HEALTHY_HEADROOM`"));
+    .find((line) => line.startsWith("| `OMNIROUTE_CHAT_ADMISSION_HEALTHY_HEADROOM`"));
   assert.ok(large);
   assert.ok(heavy);
   assert.ok(headroom);
