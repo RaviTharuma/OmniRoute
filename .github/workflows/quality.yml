@@ -250,6 +250,7 @@ jobs:
           "$HOME/.local/bin/oasdiff" --version || true
           zizmor --version || true
       - name: Forgotten sibling tests (advisory)
+        continue-on-error: true
         env:
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |

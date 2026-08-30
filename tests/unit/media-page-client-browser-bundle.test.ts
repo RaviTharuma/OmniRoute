@@ -14,6 +14,7 @@ async function assertBrowserBundleSafe(relativePath: string) {
       bundle: true,
       format: "esm",
       logLevel: "silent",
+      loader: { ".css": "empty" },
       platform: "browser",
       tsconfig: "tsconfig.json",
       write: false,
