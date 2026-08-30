@@ -38,6 +38,7 @@ import { registerBuiltinCompressionEngines } from "./engines/index.ts";
 import { getCompressionEngine, getEngineEntry } from "./engines/registry.ts";
 import { codexResponsesEngine } from "./engines/codexResponses/index.ts";
 import { applyOmniglyphSingleMode } from "./engines/omniglyphSingleMode.ts";
+import { isPreservedSystemRole } from "./messageContent.ts";
 import { applyRtkCompression } from "./engines/rtk/index.ts";
 import { adaptBodyForCompression } from "./bodyAdapter.ts";
 import {
@@ -391,7 +392,7 @@ function runCompression(
       ...(options?.config?.preserveSystemPrompt !== false
         ? {
             compressRoles: (options?.config?.cavemanConfig?.compressRoles ?? ["user"]).filter(
-              (role) => role !== "system" && role !== "developer"
+              (role) => !isPreservedSystemRole(role)
             ),
           }
         : {}),
