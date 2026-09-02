@@ -980,6 +980,20 @@ async function handleChatImplementation(
     // Pre-check function used by combo routing. For explicit combo live tests,
     // avoid pre-skipping so each model gets a real execution attempt.
     const comboPreselectedCredentials = new Map<string, any>();
+    // #12137: memoize GitHub live catalog once per request so combo candidates
+    // reuse a single getActiveSyncedCatalog fetch instead of re-hitting DB.
+    const githubLiveCatalogByProvider = new Map<
+      string,
+      ReturnType<typeof getActiveSyncedCatalog>
+    >();
+    const getGithubLiveCatalog = (providerId: string) => {
+      let pending = githubLiveCatalogByProvider.get(providerId);
+      if (!pending) {
+        pending = getActiveSyncedCatalog(providerId);
+        githubLiveCatalogByProvider.set(providerId, pending);
+      }
+      return pending;
+    };
     const getComboCredentialCacheKey = (
       modelString: string,
       target?: { connectionId?: string | null; executionKey?: string | null }
@@ -1042,7 +1056,7 @@ async function handleChatImplementation(
       // nothing has been synced yet (same pattern as providerWildcard).
       if (provider === "github" || provider === "gh") {
         const inLiveCatalog = catalogContainsModel(
-          await getActiveSyncedCatalog(provider),
+          await getGithubLiveCatalog(provider),
           resolvedModel
         );
         if (inLiveCatalog === false) return false;
