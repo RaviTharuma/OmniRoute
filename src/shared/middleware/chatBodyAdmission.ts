@@ -922,14 +922,7 @@ function rebuildRequest(request: Request, body: Uint8Array): Request {
   } as RequestInit & { duplex: "half" });
 }
 
-/**
- * Reserve heavyweight capacity and ingest the body with a hard byte bound before JSON
- * parsing. Missing/invalid Content-Length is sniffed only up to the heavyweight threshold;
- * a lease is acquired atomically before retaining bytes at or beyond that threshold.
- *
- * Internal self-loop sub-requests (vision-bridge describe calls) bypass the lease
- * reservation — they run inside a parent request that already holds the lease.
- */
+/** Reserve heavyweight capacity and ingest the body with a hard byte bound. */
 export async function admitChatRequest(
   request: Request,
   options: {
@@ -1008,9 +1001,10 @@ export async function admitChatRequest(
 
   const heapPressureCheck = options.heapPressureCheck ?? defaultHeapPressureCheck;
   let lease: ChatAdmissionLease | null = null;
+  // #10437: busy primary + healthy heap uses tryAcquireHealthyHeadroom; else queue/shed.
+  // Bodies at/above OMNIROUTE_CHAT_LARGE_BODY_BYTES take this same heavyweight lease.
   const reserve = async (bytes = 0): Promise<boolean> => {
     if (lease) return true;
-    // #10437: busy primary + healthy heap uses tryAcquireHealthyHeadroom; else queue/shed.
     const countLease =
       controller.tryAcquireHeavy() ??
       (!heapPressureCheck() ? controller.tryAcquireHealthyHeadroom() : null) ??

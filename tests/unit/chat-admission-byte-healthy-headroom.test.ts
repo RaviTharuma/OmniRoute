@@ -6,11 +6,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ChatAdmissionController,
+  CHAT_LARGE_BODY_BYTES,
   admitChatRequest,
 } from "../../src/shared/middleware/chatBodyAdmission.ts";
 
-function byteHeavyBody(): string {
-  return JSON.stringify({ input: [{ role: "user", content: "x".repeat(40) }] });
+function byteHeavyBody(minBytes = 40): string {
+  return JSON.stringify({ input: [{ role: "user", content: "x".repeat(minBytes) }] });
 }
 
 function responsesRequest(body: string): Request {
@@ -76,4 +77,33 @@ test("byte-heavy admitChatRequest: a pressured heap still 503s the second concur
     assert.equal((await shed.response.json()).error.code, "chat_admission_busy");
   }
   for (const result of admitted) if (result.admit) result.lease?.release();
+});
+
+test("OMNIROUTE_CHAT_LARGE_BODY_BYTES default threshold takes the heavyweight lease and healthy-headroom", async () => {
+  const controller = new ChatAdmissionController(1, undefined, 1);
+  const body = byteHeavyBody(CHAT_LARGE_BODY_BYTES);
+  assert.ok(
+    body.length >= CHAT_LARGE_BODY_BYTES,
+    "fixture must sit at or above the default LARGE_BODY_BYTES threshold"
+  );
+  const options = {
+    controller,
+    hardMaxBytes: CHAT_LARGE_BODY_BYTES * 2,
+    queueMs: 0,
+    heapPressureCheck: () => false,
+  };
+
+  const [first, second] = await Promise.all([
+    admitChatRequest(responsesRequest(body), options),
+    admitChatRequest(responsesRequest(body), options),
+  ]);
+
+  assert.equal(first.admit, true, "body at LARGE_BODY_BYTES must take the primary lease");
+  assert.equal(second.admit, true, "second LARGE_BODY_BYTES body must use healthy-headroom");
+  assert.equal(controller.activeHeavy, 1);
+  assert.equal(controller.activeHealthyHeadroom, 1);
+  if (first.admit) first.lease?.release();
+  if (second.admit) second.lease?.release();
+  assert.equal(controller.activeHeavy, 0);
+  assert.equal(controller.activeHealthyHeadroom, 0);
 });
