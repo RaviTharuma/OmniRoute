@@ -327,8 +327,9 @@ export function describeMalformedNonStream(
     const rawMessage =
       typeof err?.message === "string" && err.message.trim().length > 0 ? err.message.trim() : null;
     return {
+      // Trim only here; buildErrorBody (chatCore) does the single sanitization pass.
       message: rawMessage
-        ? sanitizeErrorMessage(`upstream reported a failed response: ${rawMessage}`)
+        ? `upstream reported a failed response: ${rawMessage}`
         : "upstream reported a failed response without usable output",
       code: "upstream_response_failed",
       type: "upstream_response_error",
