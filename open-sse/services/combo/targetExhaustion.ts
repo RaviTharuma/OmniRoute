@@ -61,12 +61,18 @@ export function isQuotaOrCreditsError(
   errorText: string,
   structuredError?: { code?: string; type?: string; message?: string }
 ): boolean {
-  const blob = [errorText, structuredError?.code, structuredError?.type, structuredError?.message]
-    .filter(Boolean)
-    .join(" ");
-  if (/credits exhausted/i.test(blob)) return true;
-  if (/quota exhausted/i.test(blob) && !/authentication expired/i.test(blob)) return true;
-  return classifyErrorText(structuredError?.code || errorText) === RateLimitReason.QUOTA_EXHAUSTED;
+  const blobs = [
+    errorText,
+    structuredError?.type,
+    structuredError?.message,
+    structuredError?.code,
+  ].filter((value): value is string => Boolean(value));
+  const joined = blobs.join(" ");
+  if (/credits exhausted/i.test(joined)) return true;
+  if (/quota exhausted/i.test(joined) && !/authentication expired/i.test(joined)) return true;
+  // Classify each candidate independently. A non-quota structuredError.code must
+  // not hide quota wording in errorText or structuredError.message.
+  return blobs.some((blob) => classifyErrorText(blob) === RateLimitReason.QUOTA_EXHAUSTED);
 }
 
 export type ComboExhaustionSets = {

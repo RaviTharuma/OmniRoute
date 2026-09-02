@@ -39,7 +39,34 @@ test("#12441 isQuotaOrCreditsError detects credits-exhausted 401 bodies", () => 
     true
   );
   assert.equal(
-    isQuotaOrCreditsError("[claude] All 1 connection(s) authentication expired — please reconnect in the dashboard"),
+    isQuotaOrCreditsError(
+      "[claude] All 1 connection(s) authentication expired — please reconnect in the dashboard"
+    ),
+    false
+  );
+});
+
+test("#12441 isQuotaOrCreditsError still matches quota text when structuredError.code is non-quota", () => {
+  assert.equal(
+    isQuotaOrCreditsError("generic upstream failure", {
+      code: "invalid_request",
+      type: "api_error",
+      message: "You've reached your usage limit for this billing cycle",
+    }),
+    true
+  );
+  assert.equal(
+    isQuotaOrCreditsError(
+      "[chutes] All 3 connection(s) credits exhausted — please reconnect in the dashboard",
+      { code: "unauthorized", type: "auth_error" }
+    ),
+    true
+  );
+  assert.equal(
+    isQuotaOrCreditsError("generic upstream failure", {
+      code: "unauthorized",
+      message: "authentication expired",
+    }),
     false
   );
 });
@@ -49,8 +76,7 @@ test("#12441 credits-exhausted HTTP 401 does not mark auth-level connection skip
   const exhausted = applyComboTargetExhaustion(chutesTarget(), {
     result: { status: 401 },
     fallbackResult: {},
-    errorText:
-      "[chutes] All 3 connection(s) credits exhausted — please reconnect in the dashboard",
+    errorText: "[chutes] All 3 connection(s) credits exhausted — please reconnect in the dashboard",
     rawModel: "moonshotai/Kimi-K3-TEE",
     isTokenLimitBreach: false,
     allAccountsRateLimited: false,
@@ -63,6 +89,29 @@ test("#12441 credits-exhausted HTTP 401 does not mark auth-level connection skip
   assert.equal(exhausted, false);
   assert.equal(s.exhaustedConnections.has("chutes:conn-chutes-1"), false);
   assert.equal(s.exhaustedProviders.has("chutes"), false);
+});
+
+test("#12441 structuredError quota message with a non-quota code does not auth-skip", () => {
+  const s = emptySets();
+  const exhausted = applyComboTargetExhaustion(chutesTarget(), {
+    result: { status: 401 },
+    fallbackResult: {},
+    errorText: "generic upstream failure",
+    rawModel: "moonshotai/Kimi-K3-TEE",
+    isTokenLimitBreach: false,
+    allAccountsRateLimited: false,
+    requestScopedFailure: false,
+    sets: s,
+    log,
+    tag: "COMBO",
+    exhaustedLogLevel: "info",
+    structuredError: {
+      code: "invalid_request",
+      message: "You've reached your usage limit for this billing cycle",
+    },
+  });
+  assert.equal(exhausted, false);
+  assert.equal(s.exhaustedConnections.has("chutes:conn-chutes-1"), false);
 });
 
 test("#12441 real authentication expired 401 still marks the connection", () => {
@@ -85,7 +134,6 @@ test("#12441 real authentication expired 401 still marks the connection", () => 
   assert.equal(s.exhaustedConnections.has("chutes:conn-chutes-1"), true);
 });
 
-
 function quotaTarget() {
   return {
     kind: "model",
@@ -102,8 +150,7 @@ test("#12441 credits-exhausted 401 on a non-passthrough provider takes quota ski
   const exhausted = applyComboTargetExhaustion(quotaTarget(), {
     result: { status: 401 },
     fallbackResult: {},
-    errorText:
-      "[chutes] All 3 connection(s) credits exhausted — please reconnect in the dashboard",
+    errorText: "[chutes] All 3 connection(s) credits exhausted — please reconnect in the dashboard",
     rawModel: "m1",
     isTokenLimitBreach: false,
     allAccountsRateLimited: false,
