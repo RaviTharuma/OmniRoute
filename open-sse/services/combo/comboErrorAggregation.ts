@@ -1,3 +1,12 @@
+import { isContextOverflow400 } from "./comboPredicates.ts";
+
+function isOverflowOutcome(errorText: string): boolean {
+  return (
+    isContextOverflow400(errorText) ||
+    /context_length_exceeded|context_window_exceeded/i.test(errorText)
+  );
+}
+
 /**
  * Shared combo terminal-error aggregation.
  *
@@ -63,6 +72,10 @@ const KIND_LABELS: Record<ComboOutcomeKind, string> = {
  */
 export function classifyComboOutcome(status: number, errorText: string): ComboOutcomeKind {
   const text = typeof errorText === "string" ? errorText : "";
+  // Local overflow is request-scoped. It must never look like a connection
+  // timeout (408) or provider 502 — that remaps 400 context_length_exceeded
+  // into a fake HTTP 408 / "Unknown error" 502.
+  if (isOverflowOutcome(text)) return "model";
   if (
     status === 401 ||
     status === 403 ||
@@ -162,6 +175,10 @@ export function resolveComboTerminalStatus(
   fallbackStatus: number
 ): number {
   if (!entries.length) return fallbackStatus;
+
+  if (entries.every((e) => isOverflowOutcome(e.error))) {
+    return 400;
+  }
 
   const allGenuinelyInvalidRequest = entries.every(
     (e) => e.kind === "model" && e.status >= 400 && e.status < 500

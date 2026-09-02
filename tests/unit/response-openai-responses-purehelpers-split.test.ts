@@ -58,3 +58,28 @@ test("normalizeUpstreamFailure preserves upstream error semantics", async () => 
   );
   assert.equal(normalizeUpstreamFailure({ message: "boom" }).status, 502);
 });
+
+test("normalizeUpstreamFailure keeps message-only local overflow at 400, not 502", async () => {
+  const { normalizeUpstreamFailure, isLocalContextOverflow } =
+    await import("../../open-sse/translator/response/openai-responses/pureHelpers.ts");
+
+  const messageOnly = normalizeUpstreamFailure({
+    error: {
+      message:
+        "Input exceeds context window for openai/gpt-5.6-codex: estimated 900000 input tokens, limit 872000.",
+    },
+  });
+  assert.equal(messageOnly.status, 400);
+  assert.equal(messageOnly.type, "invalid_request_error");
+  assert.equal(messageOnly.code, "context_length_exceeded");
+
+  const typeOnly = normalizeUpstreamFailure({
+    error: { type: "context_length_exceeded", message: "too many tokens" },
+  });
+  assert.equal(typeOnly.status, 400);
+  assert.equal(typeOnly.code, "context_length_exceeded");
+
+  assert.equal(isLocalContextOverflow({ message: "boom" }), false);
+  assert.equal(normalizeUpstreamFailure({ message: "boom" }).status, 502);
+  assert.equal(normalizeUpstreamFailure({ message: "boom" }).code, "bad_gateway");
+});

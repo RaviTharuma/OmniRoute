@@ -301,6 +301,28 @@ test("Responses -> OpenAI: response.failed records upstream error", () => {
   assert.match(state.upstreamError.message, /Rate limit reached/);
 });
 
+test("Responses -> OpenAI: message-only context overflow stays 400, not 502", () => {
+  const state = {};
+  const result = openaiResponsesToOpenAIResponse(
+    {
+      type: "response.failed",
+      response: {
+        error: {
+          message:
+            "Input exceeds context window for openai/gpt-5.6-codex: estimated 900000 input tokens, limit 872000.",
+        },
+      },
+    },
+    state
+  );
+
+  assert.equal(result, null);
+  assert.ok(state.upstreamError);
+  assert.equal(state.upstreamError.status, 400);
+  assert.equal(state.upstreamError.type, "invalid_request_error");
+  assert.equal(state.upstreamError.code, "context_length_exceeded");
+});
+
 test("OpenAI -> Responses: deduplicates repeated tool argument snapshots", () => {
   const args = JSON.stringify({ command: "grep -r pattern /var" });
   const events = collectEvents([

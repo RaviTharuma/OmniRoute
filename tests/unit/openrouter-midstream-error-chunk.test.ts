@@ -83,3 +83,28 @@ test("OpenRouter mid-stream error with a rate-limit code maps to a 429 upstreamE
   assert.equal(completedEvent.data.response.status, "failed");
   assert.equal(completedEvent.data.response.error.code, "429");
 });
+
+test("OpenAI -> Responses: message-only context overflow stays 400, not 502", () => {
+  const state = initState(FORMATS.OPENAI_RESPONSES);
+
+  openaiToOpenAIResponsesResponse(
+    {
+      choices: [],
+      error: {
+        message:
+          "Input exceeds maximum input tokens for openai/gpt-5.6-codex: estimated 900000 input tokens, max input 872000.",
+      },
+    },
+    state
+  );
+
+  assert.equal(state.upstreamError?.status, 400);
+  assert.equal(state.upstreamError?.type, "invalid_request_error");
+  assert.equal(state.upstreamError?.code, "context_length_exceeded");
+
+  const flushEvents = openaiToOpenAIResponsesResponse(null, state);
+  const completedEvent = flushEvents.find((e) => e.event === "response.completed");
+  assert.ok(completedEvent);
+  assert.equal(completedEvent.data.response.status, "failed");
+  assert.equal(completedEvent.data.response.error.code, "400");
+});
