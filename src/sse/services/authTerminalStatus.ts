@@ -31,6 +31,44 @@ export function isConnectionWideCreditsExhausted(
 ): boolean {
   return result.creditsExhausted || (status === 402 && !isPerModelQuotaProvider);
 }
+
+/** Credits-depleted bodies park; renewing billing-cycle quota does not. */
+export function shouldParkCreditsExhausted(
+  status: number,
+  result: { permanent?: boolean; creditsExhausted?: boolean },
+  isPerModelQuotaProvider: boolean,
+  errorText: string
+): boolean {
+  return (
+    isConnectionWideCreditsExhausted(status, result, isPerModelQuotaProvider) ||
+    (!isPerModelQuotaProvider && isCreditsExhausted(errorText))
+  );
+}
+
+function isNonTerminalProviderError(providerErrorType: string | null): boolean {
+  return (
+    providerErrorType === PROVIDER_ERROR_TYPES.PROJECT_ROUTE_ERROR ||
+    providerErrorType === PROVIDER_ERROR_TYPES.GEO_BLOCKED ||
+    providerErrorType === PROVIDER_ERROR_TYPES.OAUTH_INVALID_TOKEN ||
+    // #1010: Cloudflare fingerprint rejection is the CDN refusing the CLIENT's
+    // signature, not the account's credentials — never a terminal account state.
+    providerErrorType === PROVIDER_ERROR_TYPES.FINGERPRINT_REJECTION
+  );
+}
+
+function isExpiredAuthFailure(
+  status: number,
+  providerErrorType: string | null,
+  provider: string | null
+): boolean {
+  return (
+    (providerErrorType === PROVIDER_ERROR_TYPES.ACCOUNT_DEACTIVATED ||
+      providerErrorType === PROVIDER_ERROR_TYPES.UNAUTHORIZED ||
+      status === 401) &&
+    !isRecoverableCookieAuth401(provider, providerErrorType)
+  );
+}
+
 export function resolveTerminalConnectionStatus(
   status: number,
   result: { permanent?: boolean; creditsExhausted?: boolean },
@@ -39,37 +77,16 @@ export function resolveTerminalConnectionStatus(
   isPerModelQuotaProvider = false,
   errorText: string = ""
 ): string | null {
-  // Credits-depleted bodies (and explicit 402) park the connection. A renewing
-  // quota window (billing-cycle / usage-limit QUOTA_EXHAUSTED) must stay on the
-  // cached-reset cooldown path — not credits_exhausted with cooldownMs=0.
-  if (
-    isConnectionWideCreditsExhausted(status, result, isPerModelQuotaProvider) ||
-    (!isPerModelQuotaProvider && isCreditsExhausted(errorText))
-  ) {
+  if (shouldParkCreditsExhausted(status, result, isPerModelQuotaProvider, errorText)) {
     return "credits_exhausted";
   }
-  if (
-    providerErrorType === PROVIDER_ERROR_TYPES.PROJECT_ROUTE_ERROR ||
-    providerErrorType === PROVIDER_ERROR_TYPES.GEO_BLOCKED ||
-    providerErrorType === PROVIDER_ERROR_TYPES.OAUTH_INVALID_TOKEN ||
-    // #1010: Cloudflare fingerprint rejection is the CDN refusing the CLIENT's
-    // signature, not the account's credentials — never a terminal account state.
-    // A different client on the same key succeeds (measured 2026-08-08: curl 200,
-    // urllib 403 on byte-identical body), so banning the account here would flip a
-    // healthy free pool to ALL_ACCOUNTS_INACTIVE after two such calls.
-    providerErrorType === PROVIDER_ERROR_TYPES.FINGERPRINT_REJECTION
-  ) {
+  if (isNonTerminalProviderError(providerErrorType)) {
     return null;
   }
   if (result.permanent || providerErrorType === PROVIDER_ERROR_TYPES.FORBIDDEN) {
     return "banned";
   }
-  if (
-    (providerErrorType === PROVIDER_ERROR_TYPES.ACCOUNT_DEACTIVATED ||
-      providerErrorType === PROVIDER_ERROR_TYPES.UNAUTHORIZED ||
-      status === 401) &&
-    !isRecoverableCookieAuth401(provider, providerErrorType)
-  ) {
+  if (isExpiredAuthFailure(status, providerErrorType, provider)) {
     return "expired";
   }
   return null;

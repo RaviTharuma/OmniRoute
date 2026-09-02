@@ -564,16 +564,11 @@ export async function checkConnection(conn) {
     }
   }
 
-  // #8182: skip banned/expired connections (real dead credentials).
-  // credits_exhausted is a renewing window — keep sweeping so OAuth refresh
-  // can clear a false no-quota mark.
-  //
-  // #5326 exception: a GitHub Copilot access-token-only connection parked in
-  // "expired" with errorCode "no_refresh_token" is NOT actually terminal — it's
-  // the exact target of the self-heal below (canClearGitHubNoRefreshTokenState),
-  // which clears that stale status back to "active" once the Copilot sub-token
-  // proves usable. Treating it as terminal here made that self-heal unreachable,
-  // leaving healthy Copilot connections stuck at "expired" forever.
+  // #8182: skip banned/expired (dead credentials). credits_exhausted is a
+  // renewing window — keep sweeping so OAuth refresh can clear a false mark.
+  // #5326: GitHub Copilot access-token-only "expired" + no_refresh_token is
+  // the self-heal target below (canClearGitHubNoRefreshTokenState). Treating
+  // it as terminal made that heal unreachable and stuck healthy Copilot rows.
   const isRecoverableGithubCopilotNoRefresh =
     conn.testStatus === "expired" &&
     conn.errorCode === "no_refresh_token" &&
@@ -594,9 +589,7 @@ export async function checkConnection(conn) {
     conn.testStatus === "expired" &&
     conn.lastErrorType !== "account_deactivated" &&
     getExpiredRetryCount(conn) < EXPIRED_RETRY_MAX;
-  // credits_exhausted is a renewing window, not a dead credential — skip
-  // only banned/expired here so OAuth refresh can still clear a false
-  // no-quota mark. Combo pre-skip still hides exhausted rows until recovery.
+  // Skip only banned/expired. Combo pre-skip still hides exhausted rows.
   const terminalStatuses = new Set(["banned", "expired"]);
   if (
     typeof conn.testStatus === "string" &&
