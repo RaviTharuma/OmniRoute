@@ -57,6 +57,7 @@ import { getCreditsMode } from "@omniroute/open-sse/services/antigravityCredits.
 import { preferAntigravityConnectionsWithStoredProject } from "@omniroute/open-sse/services/antigravityProjectPersistence.ts";
 import {
   isAccountUnavailable,
+  isCreditsExhausted,
   getUnavailableUntil,
   getEarliestRateLimitedUntil,
   cooldownUntilMs,
@@ -359,9 +360,16 @@ function resolveTerminalConnectionStatus(
   result: { permanent?: boolean; creditsExhausted?: boolean },
   providerErrorType: string | null = null,
   provider: string | null = null,
-  isPerModelQuotaProvider = false
+  isPerModelQuotaProvider = false,
+  errorText: string = ""
 ): string | null {
-  if (isConnectionWideCreditsExhausted(status, result, isPerModelQuotaProvider)) {
+  // Credits-depleted bodies (and explicit 402) park the connection. A renewing
+  // quota window (billing-cycle / usage-limit QUOTA_EXHAUSTED) must stay on the
+  // cached-reset cooldown path — not credits_exhausted with cooldownMs=0.
+  if (
+    isConnectionWideCreditsExhausted(status, result, isPerModelQuotaProvider) ||
+    (!isPerModelQuotaProvider && isCreditsExhausted(errorText))
+  ) {
     return "credits_exhausted";
   }
   if (
@@ -3038,13 +3046,24 @@ export async function markAccountUnavailable(
       return { shouldFallback: true, cooldownMs: lockout.cooldownMs };
     }
 
-    const terminalStatus = resolveTerminalConnectionStatus(
+    let terminalStatus = resolveTerminalConnectionStatus(
       status,
       result as { permanent?: boolean; creditsExhausted?: boolean },
       providerErrorType,
       provider,
-      isPerModelQuotaProvider
+      isPerModelQuotaProvider,
+      errorText
     );
+    // A still-valid access token after a successful refresh is not "expired".
+    // A follow-up 401 (timeout, hop, race) must cooldown, not park the account.
+    const tokenExpiryMs = Date.parse(String(conn?.tokenExpiresAt || conn?.expiresAt || ""));
+    if (
+      terminalStatus === "expired" &&
+      Number.isFinite(tokenExpiryMs) &&
+      tokenExpiryMs > Date.now() + 60_000
+    ) {
+      terminalStatus = null;
+    }
     const cachedQuotaResetAt =
       providerErrorType === PROVIDER_ERROR_TYPES.QUOTA_EXHAUSTED ||
       reason === RateLimitReason.QUOTA_EXHAUSTED

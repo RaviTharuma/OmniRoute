@@ -564,11 +564,9 @@ export async function checkConnection(conn) {
     }
   }
 
-  // #8182: skip terminal connections (credits_exhausted / banned / expired).
-  // These can never self-heal via a token refresh — probing them wastes
-  // CPU and network on every sweep cycle. Mirrors isTerminalConnectionStatus
-  // in src/sse/services/auth.ts and TERMINAL_CONNECTION_STATUSES in
-  // src/lib/quota/connectionRecovery.ts.
+  // #8182: skip banned/expired connections (real dead credentials).
+  // credits_exhausted is a renewing window — keep sweeping so OAuth refresh
+  // can clear a false no-quota mark.
   //
   // #5326 exception: a GitHub Copilot access-token-only connection parked in
   // "expired" with errorCode "no_refresh_token" is NOT actually terminal — it's
@@ -596,7 +594,10 @@ export async function checkConnection(conn) {
     conn.testStatus === "expired" &&
     conn.lastErrorType !== "account_deactivated" &&
     getExpiredRetryCount(conn) < EXPIRED_RETRY_MAX;
-  const terminalStatuses = new Set(["credits_exhausted", "banned", "expired"]);
+  // credits_exhausted is a renewing window, not a dead credential — skip
+  // only banned/expired here so OAuth refresh can still clear a false
+  // no-quota mark. Combo pre-skip still hides exhausted rows until recovery.
+  const terminalStatuses = new Set(["banned", "expired"]);
   if (
     typeof conn.testStatus === "string" &&
     terminalStatuses.has(conn.testStatus.toLowerCase()) &&
