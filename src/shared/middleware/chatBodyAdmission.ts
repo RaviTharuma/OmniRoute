@@ -92,6 +92,33 @@ export const CHAT_ADMISSION_MAX_QUEUED_BYTES = parsePositiveInt(
   4 * 1024 * 1024
 );
 
+/** Conservative tokens-from-bytes estimate used by the ~872k context gate. */
+export const CHAT_ADMISSION_TOKEN_BYTES = 4;
+
+/**
+ * Default usable window the local context gate compares against (GPT-5.6 Codex
+ * / the catalog 872k cap). A body at or above this estimate must reach
+ * compression and the 400 overflow path instead of a queued_bytes 503.
+ */
+export const CHAT_ADMISSION_CONTEXT_WINDOW_TOKENS = 872_000;
+
+export function estimateAdmissionTokensFromBytes(bytes: number): number {
+  const size = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
+  return Math.ceil(size / CHAT_ADMISSION_TOKEN_BYTES);
+}
+
+/** True when `bytes` already look larger than the 872k context gate. */
+export function isOverWindowAdmissionBody(bytes: number): boolean {
+  return estimateAdmissionTokensFromBytes(bytes) >= CHAT_ADMISSION_CONTEXT_WINDOW_TOKENS;
+}
+
+function queuedBytesCharge(queuedBytes: number): number {
+  const size = Number.isFinite(queuedBytes) ? Math.max(0, Math.floor(queuedBytes)) : 0;
+  // Over-window bodies skip the heap-valve charge so they can reach compression
+  // and the 400 context gate. In-window waiters still contend for the budget.
+  return isOverWindowAdmissionBody(size) ? 0 : size;
+}
+
 export const CHAT_HEAVY_MESSAGE_COUNT = parsePositiveInt(
   process.env.OMNIROUTE_CHAT_HEAVY_MESSAGE_COUNT,
   200
@@ -435,6 +462,11 @@ export class ChatAdmissionController {
    * amplify the heap (#4380). An over-budget wait is rejected immediately with
    * `null` (retryable 503) and never parks; the charge is released on wake,
    * abort, or timeout.
+   *
+   * Bodies already at/above the 872k context gate skip that 503 and the charge
+   * (`#9940` / `#10183`). They must reach compression and the local 400 overflow
+   * path instead of dying as `queued_bytes_budget`. In-window waiters still
+   * contend for the aggregate budget.
    */
   async acquireHeavyWithin(
     timeoutMs: number,
@@ -443,6 +475,7 @@ export class ChatAdmissionController {
     sessionKey = "default"
   ): Promise<ChatAdmissionLease | null> {
     const deadline = Date.now() + Math.max(0, Math.floor(timeoutMs));
+    const charge = queuedBytesCharge(queuedBytes);
     for (;;) {
       if (signal?.aborted) return null;
       const lease = this.tryAcquireHeavy();
@@ -455,12 +488,12 @@ export class ChatAdmissionController {
         return null;
       }
       // Heap valve: refuse to park when the queued-bytes budget is exhausted.
-      if (queuedBytes > 0 && this.#queuedBytes + queuedBytes > this.maxQueuedBytes) {
+      if (charge > 0 && this.#queuedBytes + charge > this.maxQueuedBytes) {
         // Same retryable 503, distinct cause: the wait itself would amplify the heap.
         this.recordShed("queued_bytes_budget", sessionKey);
         return null;
       }
-      this.#queuedBytes += queuedBytes;
+      this.#queuedBytes += charge;
       // Park into this key's FIFO (creating the key on first use).
       let queue = this.#queues.get(sessionKey);
       if (!queue) {
@@ -499,7 +532,7 @@ export class ChatAdmissionController {
       }
       const timedOut = await Promise.race(races);
       // The waiter has left its queue (wake, abort, or timeout) — release its charge.
-      this.#queuedBytes = Math.max(0, this.#queuedBytes - queuedBytes);
+      this.#queuedBytes = Math.max(0, this.#queuedBytes - charge);
       this.#removeWaiter(waiter);
       // Cancel the deadline timer when abort/release wins; a fired timer is a no-op.
       if (deadlineTimer) clearTimeout(deadlineTimer);
