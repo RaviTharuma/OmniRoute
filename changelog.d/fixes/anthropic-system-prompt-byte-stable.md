@@ -1,0 +1,1 @@
+- **fix(compression):** keep the Anthropic `system` block byte-stable when preserveSystemPrompt/skipSystemPrompt is set or dropped on Claude translation; history and tools may still compress

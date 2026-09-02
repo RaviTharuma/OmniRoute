@@ -195,10 +195,18 @@ async function applyOmniglyph(
   if (!isModelWithinScope(model, profile.name)) {
     return skip(body, "model_not_approved");
   }
-  const preserveSystemPrompt =
-    (typeof options?.stepConfig?.preserveSystemPrompt === "boolean"
+  const explicitPreserve =
+    typeof options?.stepConfig?.preserveSystemPrompt === "boolean"
       ? options.stepConfig.preserveSystemPrompt
-      : options?.config?.preserveSystemPrompt) === true;
+      : typeof options?.config?.preserveSystemPrompt === "boolean"
+        ? options.config.preserveSystemPrompt
+        : null;
+  // Claude/Anthropic wire: default preserve (other engines use `!== false`). A
+  // dropped skipSystemPrompt/preserveSystemPrompt on Anthropic translation must
+  // not flip the system block into compressSystem=true. OpenAI wires keep the
+  // explicit `=== true` gate — that path cannot honor preservation and skips.
+  const preserveSystemPrompt =
+    explicitPreserve === true || (explicitPreserve !== false && wireFormat === "claude");
   // `compressSystem` só existe no transform Anthropic. Os wires OpenAI honram
   // apenas compressTools/gptHistory/minCompressChars/reflow e sempre trocam a
   // instrução por um ponteiro para a imagem. Imagear o system quando o OmniRoute

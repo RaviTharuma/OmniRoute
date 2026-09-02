@@ -1,6 +1,7 @@
 import { isVisionModelId } from "@/shared/constants/visionModels";
 import type { CompressionResult, CompressionMode } from "./types.ts";
 import { createCompressionStats } from "./stats.ts";
+import { isPreservedSystemRole } from "./messageContent.ts";
 
 interface Message {
   role: string;
@@ -44,7 +45,7 @@ export function collapseWhitespace(
   if (!body.messages) return { body, applied: false };
   let applied = false;
   const messages = body.messages.map((msg) => {
-    if (options.preserveSystemPrompt === true && msg.role === "system") return msg;
+    if (options.preserveSystemPrompt === true && isPreservedSystemRole(msg.role)) return msg;
     if (typeof msg.content !== "string") return msg;
     const normalized = normalizeMessageWhitespace(msg.content);
     if (normalized !== msg.content) applied = true;
@@ -65,7 +66,7 @@ export function dedupSystemPrompt(
   const seen = new Set<string>();
   let applied = false;
   const messages = body.messages.filter((msg) => {
-    if (msg.role !== "system" || typeof msg.content !== "string") return true;
+    if (!isPreservedSystemRole(msg.role) || typeof msg.content !== "string") return true;
     const key = msg.content.trim().slice(0, 200);
     if (seen.has(key)) {
       applied = true;
@@ -150,7 +151,7 @@ export function removeRedundantContent(
   const messages: Message[] = [];
   for (let i = 0; i < body.messages.length; i++) {
     const msg = body.messages[i];
-    if (options.preserveSystemPrompt === true && msg.role === "system") {
+    if (options.preserveSystemPrompt === true && isPreservedSystemRole(msg.role)) {
       messages.push(msg);
       continue;
     }
