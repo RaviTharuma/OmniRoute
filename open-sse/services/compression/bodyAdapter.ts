@@ -284,10 +284,92 @@ export type CompressionBodyAdapter = {
   ): Record<string, unknown>;
 };
 
+function hasAnthropicSystemField(body: Record<string, unknown>): boolean {
+  if (body.system == null) return false;
+  if (typeof body.system === "string") return body.system.length > 0;
+  return Array.isArray(body.system) && body.system.length > 0;
+}
+
+function anthropicSystemToMessage(system: unknown): MessageLike {
+  if (typeof system === "string") {
+    return { role: "system", content: system };
+  }
+  if (Array.isArray(system)) {
+    const text = system
+      .map((block) => {
+        if (typeof block === "string") return block;
+        if (isRecord(block) && typeof block.text === "string") return block.text;
+        return "";
+      })
+      .filter((part) => part.length > 0)
+      .join("\n");
+    return { role: "system", content: Array.isArray(system) ? system : text };
+  }
+  return { role: "system", content: String(system) };
+}
+
+function messageToAnthropicSystem(message: MessageLike, originalSystem: unknown): unknown {
+  if (Array.isArray(originalSystem)) {
+    if (Array.isArray(message.content)) return message.content;
+    if (typeof message.content === "string") {
+      let replaced = false;
+      return originalSystem.map((block) => {
+        if (!isRecord(block) || typeof block.text !== "string") return block;
+        if (replaced) return { ...block, text: "" };
+        replaced = true;
+        return { ...block, text: message.content };
+      });
+    }
+    return originalSystem;
+  }
+  return typeof message.content === "string" ? message.content : originalSystem;
+}
+
+/**
+ * Hoist Anthropic `body.system` into a synthetic role:"system" message so every
+ * engine honors preserveSystemPrompt / skipSystemPrompt. Restore writes the
+ * (possibly compressed) system text back into the original `system` field so
+ * the Claude wire stays a Claude wire.
+ */
+function adaptAnthropicSystemForCompression(body: Record<string, unknown>): CompressionBodyAdapter {
+  const originalSystem = body.system;
+  const messages = Array.isArray(body.messages) ? (body.messages as MessageLike[]) : [];
+  const alreadyHasLeadingSystem = messages[0]?.role === "system" || messages[0]?.role === "developer";
+  const systemMessage = anthropicSystemToMessage(originalSystem);
+  const adaptedMessages = alreadyHasLeadingSystem ? messages : [systemMessage, ...messages];
+
+  return {
+    body: { ...body, messages: adaptedMessages },
+    adapted: true,
+    restore(compressedBody) {
+      const compressedMessages = Array.isArray(compressedBody.messages)
+        ? (compressedBody.messages as MessageLike[])
+        : messages;
+      let nextSystem = originalSystem;
+      let nextMessages = compressedMessages;
+      if (!alreadyHasLeadingSystem && isPreservedSystemRoleMessage(compressedMessages[0])) {
+        nextSystem = messageToAnthropicSystem(compressedMessages[0], originalSystem);
+        nextMessages = compressedMessages.slice(1);
+      }
+      const rest = { ...compressedBody };
+      delete rest.messages;
+      return { ...rest, system: nextSystem, messages: nextMessages };
+    },
+  };
+}
+
+function isPreservedSystemRoleMessage(message: MessageLike | undefined): boolean {
+  return message?.role === "system" || message?.role === "developer";
+}
+
 export function adaptBodyForCompression(
   body: Record<string, unknown>,
   preserveToolNames: string[] = []
 ): CompressionBodyAdapter {
+  if (Array.isArray(body.messages) && hasAnthropicSystemField(body)) {
+    return adaptAnthropicSystemForCompression(body);
+  }
+
   if (Array.isArray(body.messages)) {
     return {
       body,

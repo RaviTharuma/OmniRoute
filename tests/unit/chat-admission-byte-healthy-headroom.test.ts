@@ -104,4 +104,6 @@ test("OMNIROUTE_CHAT_LARGE_BODY_BYTES default threshold takes the heavyweight le
   assert.equal(controller.activeHealthyHeadroom, 1);
   if (first.admit) first.lease?.release();
   if (second.admit) second.lease?.release();
+  assert.equal(controller.activeHeavy, 0);
+  assert.equal(controller.activeHealthyHeadroom, 0);
 });

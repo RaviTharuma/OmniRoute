@@ -71,9 +71,11 @@ function openaiResponsesBody(): Record<string, unknown> {
 }
 
 test("happy path: comprime corpo claude denso em blocos de imagem", async () => {
-  const r = await omniglyphEngine.applyAsync!(claudeBody(), OK);
+  const body = claudeBodyWithHistory();
+  const r = await omniglyphEngine.applyAsync!(body, OK);
   assert.equal(r.compressed, true);
   assert.ok(JSON.stringify(r.body).includes('"type":"image"'));
+  assert.equal((r.body as { system?: unknown }).system, DENSE, "Anthropic system stays byte-stable");
 });
 
 test("skip fail-closed: sem supportsVision / transporte agregador / undefined", async () => {
@@ -210,7 +212,7 @@ async function withEnv<T>(key: string, value: string, fn: () => Promise<T>): Pro
 
 test("OMNIGLYPH_PROFILE do host não decide o gate de modelo do OmniRoute", async () => {
   const r = await withEnv("OMNIGLYPH_PROFILE", "passthrough", () =>
-    omniglyphEngine.applyAsync!(claudeBody(), OK)
+    omniglyphEngine.applyAsync!(claudeBodyWithHistory(), OK)
   );
   assert.equal(
     r.compressed,

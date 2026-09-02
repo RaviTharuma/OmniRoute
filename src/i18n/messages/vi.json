@@ -11258,6 +11258,11 @@
       "copy": "Sao chép",
       "autoscrollOn": "Tự động cuộn: bật",
       "autoscrollOff": "Tự động cuộn: tắt",
+      "collapseAllLevels": "Thu gọn tất cả",
+      "collapseOneLevel": "Thu gọn một cấp",
+      "currentExpandLevel": "Cấp mở rộng hiện tại",
+      "expandOneLevel": "Mở rộng một cấp",
+      "expandAllLevels": "Mở rộng tất cả",
       "payload": {
         "clientRawRequest": "Yêu cầu thô của client",
         "clientRequest": "Yêu cầu client",

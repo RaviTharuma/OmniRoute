@@ -10,6 +10,11 @@ export interface ChatMessageLike {
   [key: string]: unknown;
 }
 
+/** Roles that carry the system prompt on OpenAI and Anthropic-translated wires. */
+export function isPreservedSystemRole(role: unknown): boolean {
+  return role === "system" || role === "developer";
+}
+
 export function isTextBlock(value: unknown): value is TextBlock {
   return (
     !!value &&

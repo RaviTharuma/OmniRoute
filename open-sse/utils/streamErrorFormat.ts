@@ -1,5 +1,6 @@
 import { FORMATS } from "../translator/formats.ts";
 import { buildErrorBody } from "./error.ts";
+import { isLocalContextOverflow } from "../translator/response/openai-responses/pureHelpers.ts";
 
 /**
  * Upstream stream-failure normalization + client-format error framing.
@@ -68,13 +69,24 @@ export function normalizeStreamFailurePayload(payload: unknown): StreamFailurePa
     toStreamFailureStatus(response.status) ??
     toStreamFailureStatus(record.status_code) ??
     toStreamFailureStatus(record.status) ??
-    (looksLikeStreamRateLimit(code, type || "", message) ? 429 : 502);
+    (looksLikeStreamRateLimit(code, type || "", message)
+      ? 429
+      : isLocalContextOverflow({ code, type, message })
+        ? 400
+        : 502);
 
   return {
     status,
     message,
-    code,
-    ...(type ? { type } : {}),
+    code:
+      status === 400 && isLocalContextOverflow({ code, type, message })
+        ? "context_length_exceeded"
+        : code,
+    ...(type
+      ? { type }
+      : status === 400 && isLocalContextOverflow({ code, type, message })
+        ? { type: "invalid_request_error" }
+        : {}),
   };
 }
 
