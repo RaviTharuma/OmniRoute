@@ -95,7 +95,7 @@ test("in-window waiters still consume queued-bytes after an over-window skip", a
 });
 
 test("admitChatRequest: over-window /v1/chat/completions body is not 503 queued_bytes", async () => {
-  const controller = new ChatAdmissionController(1, 1024);
+  const controller = new ChatAdmissionController(1, 1024, 0);
   const held = controller.tryAcquireHeavy();
   assert.ok(held);
 
@@ -122,7 +122,7 @@ test("admitChatRequest: over-window /v1/chat/completions body is not 503 queued_
 });
 
 test("admitChatRequest: over-window /v1/responses body is not 503 queued_bytes", async () => {
-  const controller = new ChatAdmissionController(1, 1024);
+  const controller = new ChatAdmissionController(1, 1024, 0);
   const held = controller.tryAcquireHeavy();
   assert.ok(held);
 
