@@ -57,7 +57,6 @@ import { getCreditsMode } from "@omniroute/open-sse/services/antigravityCredits.
 import { preferAntigravityConnectionsWithStoredProject } from "@omniroute/open-sse/services/antigravityProjectPersistence.ts";
 import {
   isAccountUnavailable,
-  isCreditsExhausted,
   getUnavailableUntil,
   getEarliestRateLimitedUntil,
   cooldownUntilMs,
