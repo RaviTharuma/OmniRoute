@@ -484,6 +484,21 @@ test("handleNoCredentials maps allExpired status='expired' to the 'authenticatio
   assert.match(json.error.message, /3 connection\(s\) authentication expired/);
 });
 
+test("handleNoCredentials maps credits_exhausted to HTTP 402 not 401 (#12441)", async () => {
+  const response = handleNoCredentials(
+    { allExpired: true, expiredCount: 3, expiredStatus: "credits_exhausted" },
+    null,
+    "chutes",
+    "moonshotai/Kimi-K3-TEE",
+    null,
+    null
+  );
+  const json = (await response.json()) as any;
+
+  assert.equal(response.status, 402);
+  assert.match(json.error.message, /3 connection\(s\) credits exhausted/);
+});
+
 test("handleNoCredentials preserves lastError over allExpired after a failed attempt", async () => {
   const response = handleNoCredentials(
     { allExpired: true, expiredCount: 1, expiredStatus: "credits_exhausted" },
