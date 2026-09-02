@@ -938,6 +938,7 @@ export async function admitChatRequest(
     largeBodyBytes?: number;
     hardMaxBytes?: number;
     queueMs?: number;
+    heapPressureCheck?: () => boolean;
   } = {}
 ): Promise<ChatRequestAdmission> {
   const sessionId = options.sessionId ?? resolveSessionId(request);
@@ -1005,15 +1006,15 @@ export async function admitChatRequest(
     return { admit: false, response: bodyExceedsBudgetResponse(controller.maxInflightBytes) };
   }
 
+  const heapPressureCheck = options.heapPressureCheck ?? defaultHeapPressureCheck;
   let lease: ChatAdmissionLease | null = null;
   const reserve = async (bytes = 0): Promise<boolean> => {
     if (lease) return true;
-    const countLease = await controller.acquireHeavyWithin(
-      queueMs,
-      request.signal,
-      bytes,
-      sessionId
-    );
+    // #10437: busy primary + healthy heap uses tryAcquireHealthyHeadroom; else queue/shed.
+    const countLease =
+      controller.tryAcquireHeavy() ??
+      (!heapPressureCheck() ? controller.tryAcquireHealthyHeadroom() : null) ??
+      (await controller.acquireHeavyWithin(queueMs, request.signal, bytes, sessionId));
     if (!countLease) return false;
 
     // Additive ingest byte-budget gate (#503-fanout), layered on top of the

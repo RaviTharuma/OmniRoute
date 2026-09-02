@@ -17,9 +17,14 @@
 // Giving each process its own DATA_DIR under the OS temp dir removes the shared file,
 // so concurrent test processes never collide. Tests that set DATA_DIR explicitly keep
 // winning — this only fills in an isolated default when none was chosen.
+import { register } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+// react18-json-view ships CSS that Next bundles; node:test cannot load .css.
+// import.meta.url is already a file: URL — do not wrap it with pathToFileURL.
+register("./cssStubLoader.mjs", import.meta.url);
 
 // File logger worker threads can outlive a test's temporary DATA_DIR cleanup and then
 // raise ENOENT/ENOTEMPTY after the test has already passed. Keep the global test default
