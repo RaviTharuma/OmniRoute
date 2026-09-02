@@ -94,6 +94,11 @@ function toNonEmptyString(value: unknown): string | null {
 // supported_endpoints) is kept, so a newly-entitled model shows up with no code
 // change. Only explicitly non-chat rows (embeddings / completion) are dropped.
 function isRoutableChatModel(item: RawRecord): boolean {
+  const policy = asRecord(item.policy);
+  const policyState = toNonEmptyString(policy.state);
+  if (policyState && policyState !== "enabled") return false;
+  if (item.model_picker_enabled === false) return false;
+
   const capabilities = asRecord(item.capabilities);
   const capType = toNonEmptyString(capabilities.type);
   if (capType) return capType === "chat";

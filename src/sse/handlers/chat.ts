@@ -78,6 +78,7 @@ import {
 } from "@/lib/db/sessionAccountAffinity";
 import { dispatchChatWithAffinityEviction } from "./chatDispatch";
 import { getCachedSettings, getCombosCacheVersion } from "@/lib/db/readCache";
+import { catalogContainsModel, getActiveSyncedCatalog } from "@/lib/db/models/activeSyncedCatalog";
 import { getCombos } from "@/lib/db/combos";
 import { resolveModelLockoutSettings } from "@/lib/resilience/modelLockoutSettings";
 import {
@@ -1037,6 +1038,15 @@ async function handleChatImplementation(
       if (!provider) return true; // can't determine provider, let it try
 
       const resolvedModel = modelInfo.model || modelString;
+      // #12137: explicit combo members vs GitHub live catalog. Fail open when
+      // nothing has been synced yet (same pattern as providerWildcard).
+      if (provider === "github" || provider === "gh") {
+        const inLiveCatalog = catalogContainsModel(
+          await getActiveSyncedCatalog(provider),
+          resolvedModel
+        );
+        if (inLiveCatalog === false) return false;
+      }
       const hasForcedConnection =
         typeof target?.connectionId === "string" && target.connectionId.trim().length > 0;
       let allowedConnections = intersectAllowedConnectionIds(
