@@ -30,7 +30,7 @@
  * instances as absolute times — the same convention `earlyStreamKeepalive.ts`
  * already follows on this streaming path.
  */
-import { attachTokensPerSecond, generationDurationMs } from "./generationThroughput.js";
+import { attachTokensPerSecond, generationDurationMs } from "./generationThroughput.ts";
 
 export interface StreamTiming {
   startedAt: number;
