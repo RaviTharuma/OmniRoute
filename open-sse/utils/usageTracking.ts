@@ -293,6 +293,7 @@ export function filterUsageForFormat(usage: UsageLike | null | undefined, target
       "cache_read_input_tokens",
       "cache_creation_input_tokens",
       "estimated",
+      "tokens_per_second",
     ],
     [FORMATS.GEMINI]: [
       "promptTokenCount",
@@ -301,6 +302,7 @@ export function filterUsageForFormat(usage: UsageLike | null | undefined, target
       "cachedContentTokenCount",
       "thoughtsTokenCount",
       "estimated",
+      "tokens_per_second",
     ],
     [FORMATS.OPENAI_RESPONSES]: [
       "input_tokens",
@@ -312,6 +314,7 @@ export function filterUsageForFormat(usage: UsageLike | null | undefined, target
       "cost_in_usd_ticks",
       "server_side_tool_usage_details",
       "server_side_tool_usage",
+      "tokens_per_second",
     ],
     // OpenAI format (default for OPENAI, CODEX, KIRO, etc.)
     default: [
@@ -327,6 +330,7 @@ export function filterUsageForFormat(usage: UsageLike | null | undefined, target
       "cache_read_input_tokens",
       "cache_creation_input_tokens",
       "estimated",
+      "tokens_per_second",
     ],
   };
 
