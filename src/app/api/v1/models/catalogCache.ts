@@ -135,6 +135,29 @@ export type CatalogCacheOptions = {
  */
 export const CATALOG_CACHE_TTL_MS_DEFAULT = 60_000;
 
+/** Cold-path wait bound for a coalesced catalog rebuild (#12627). Override with CATALOG_BUILD_TIMEOUT_MS. */
+export const CATALOG_BUILD_TIMEOUT_MS_DEFAULT = 8_000;
+
+function catalogBuildTimeoutMs(): number {
+  const raw = process.env.CATALOG_BUILD_TIMEOUT_MS;
+  if (!raw) return CATALOG_BUILD_TIMEOUT_MS_DEFAULT;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : CATALOG_BUILD_TIMEOUT_MS_DEFAULT;
+}
+
+const catalogLastGood = new Map<string, CachedCatalog>();
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+
 /**
  * Per-call knobs for {@link resolveCachedCatalogResponse}.
  *
@@ -251,6 +274,7 @@ function storePayload(
   if (buildGeneration === getModelCatalogCacheVersion()) {
     catalogCache.set(cacheKey, entry);
   }
+  if (entry.status === 200) catalogLastGood.set(cacheKey, entry);
   return entry;
 }
 
@@ -382,7 +406,21 @@ export async function resolveCachedCatalogResponse(
     });
   }
 
-  const payload = await inflight.promise;
+  let payload: CachedCatalog;
+  try {
+    payload = await withTimeout(inflight.promise, catalogBuildTimeoutMs(), "catalog_build_timeout");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (catalogInFlight.get(cacheKey)?.promise === inflight.promise) catalogInFlight.delete(cacheKey);
+    const lastGood = catalogLastGood.get(cacheKey);
+    if (msg === "catalog_build_timeout" && lastGood) {
+      return new Response(lastGood.body, {
+        status: lastGood.status,
+        headers: mergeCatalogHeaders(corsHeaders, lastGood.headers, diagnosticHeaders, { "x-omniroute-catalog": "last-good" }),
+      });
+    }
+    throw err;
+  }
   return new Response(payload.body, {
     status: payload.status,
     headers: mergeCatalogHeaders(corsHeaders, payload.headers, diagnosticHeaders),
@@ -397,6 +435,7 @@ export function __resetCatalogBuilderRunsForTest(): void {
   _catalogBuilderRuns = 0;
   catalogCache.clear();
   catalogInFlight.clear();
+  catalogLastGood.clear();
   lastSeenCatalogCacheVersion = getModelCatalogCacheVersion();
 }
 
