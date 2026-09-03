@@ -80,6 +80,45 @@ export function formatOmniRouteCost(costUsd: unknown): string {
 }
 
 /**
+ * Generation throughput (output tokens / generation seconds).
+ * Generation time is `latencyMs - ttftMs` when TTFT is strictly smaller than
+ * total latency; otherwise the full latency is used (non-stream has no
+ * separate first-token mark). Returns null when there is no output or no
+ * positive generation window.
+ */
+export function computeGenerationTokensPerSecond(
+  outputTokens: unknown,
+  latencyMs: unknown,
+  ttftMs?: unknown
+): number | null {
+  const output = toNonNegativeInteger(outputTokens);
+  const latency = toNonNegativeInteger(latencyMs);
+  if (output <= 0 || latency <= 0) return null;
+  const ttft = ttftMs == null ? 0 : toNonNegativeInteger(ttftMs);
+  const generationMs = latency > ttft ? latency - ttft : latency;
+  if (generationMs <= 0) return null;
+  return output / (generationMs / 1000);
+}
+
+export function attachOmniRouteUsageThroughput(
+  usage: UsageLike,
+  opts: { latencyMs?: unknown; ttftMs?: unknown } = {}
+): UsageLike {
+  if (!usage || typeof usage !== "object") return usage;
+  const tokens = getOmniRouteTokenCounts(usage);
+  const tps = computeGenerationTokensPerSecond(tokens.output, opts.latencyMs, opts.ttftMs);
+  if (tps != null) {
+    (usage as Record<string, unknown>).tokens_per_second = Number(tps.toFixed(4));
+  }
+  const ttft = opts.ttftMs == null ? 0 : toNonNegativeInteger(opts.ttftMs);
+  const latency = toNonNegativeInteger(opts.latencyMs);
+  if (ttft > 0 && ttft < latency) {
+    (usage as Record<string, unknown>).ttft_ms = ttft;
+  }
+  return usage;
+}
+
+/**
  * Build the `X-OmniRoute-Decision` composite header value: `strategy=<name>;
  * provider=<alias>; latency_ms=<n>`. Returns `null` when both `strategy` and
  * `provider` are absent/blank (mirrors the per-field guard pattern used for the
@@ -118,6 +157,7 @@ export function buildOmniRouteResponseMetaHeaders({
   costSavedUsd = undefined,
   fallbackAttempts = 0,
   latencyMs = 0,
+  ttftMs = undefined,
   model = null,
   provider = null,
   requestId = null,
@@ -136,6 +176,8 @@ export function buildOmniRouteResponseMetaHeaders({
   costSavedUsd?: unknown;
   fallbackAttempts?: number;
   latencyMs?: unknown;
+  /** First-token latency in ms. Omitted on non-stream when unknown. */
+  ttftMs?: unknown;
   model?: string | null;
   provider?: string | null;
   requestId?: string | null;
@@ -146,6 +188,7 @@ export function buildOmniRouteResponseMetaHeaders({
   strategy?: string | null;
   usage?: UsageLike;
 }): Record<string, string> {
+  attachOmniRouteUsageThroughput(usage, { latencyMs, ttftMs });
   const tokens = getOmniRouteTokenCounts(usage);
   const headers: Record<string, string> = {
     [OMNIROUTE_RESPONSE_HEADERS.cacheHit]: toHeaderValue(String(cacheHit)),
@@ -155,6 +198,14 @@ export function buildOmniRouteResponseMetaHeaders({
     [OMNIROUTE_RESPONSE_HEADERS.tokensOut]: toHeaderValue(String(tokens.output)),
     [OMNIROUTE_RESPONSE_HEADERS.version]: toHeaderValue(APP_CONFIG.version),
   };
+  const tps = computeGenerationTokensPerSecond(tokens.output, latencyMs, ttftMs);
+  if (tps != null) {
+    headers[OMNIROUTE_RESPONSE_HEADERS.tokensPerSecond] = toHeaderValue(tps.toFixed(2));
+  }
+  const ttft = ttftMs == null ? 0 : toNonNegativeInteger(ttftMs);
+  if (ttft > 0 && ttft < toNonNegativeInteger(latencyMs)) {
+    headers[OMNIROUTE_RESPONSE_HEADERS.ttftMs] = toHeaderValue(String(ttft));
+  }
 
   if (typeof model === "string" && model.trim().length > 0) {
     headers[OMNIROUTE_RESPONSE_HEADERS.model] = toHeaderValue(model);

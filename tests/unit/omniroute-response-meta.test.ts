@@ -5,6 +5,7 @@ import {
   attachOmniRouteMetaHeaders,
   buildOmniRouteResponseMetaHeaders,
   buildOmniRouteSseMetadataComment,
+  computeGenerationTokensPerSecond,
   formatOmniRouteCost,
   getOmniRouteTokenCounts,
 } from "../../src/domain/omnirouteResponseMeta.ts";
@@ -196,4 +197,38 @@ test("attachOmniRouteMetaHeaders forwards costSavedUsd onto a Headers bag", () =
   });
   assert.equal(headers.get(OMNIROUTE_RESPONSE_HEADERS.responseCost), "0.0000000000");
   assert.equal(headers.get(OMNIROUTE_RESPONSE_HEADERS.costSaved), "0.0125000000");
+});
+
+test("computeGenerationTokensPerSecond excludes TTFT from generation time", () => {
+  assert.equal(computeGenerationTokensPerSecond(20, 2000, 1000), 20);
+  assert.equal(computeGenerationTokensPerSecond(10, 1000), 10);
+  assert.equal(computeGenerationTokensPerSecond(0, 1000, 100), null);
+  assert.equal(computeGenerationTokensPerSecond(10, 0), null);
+});
+
+test("buildOmniRouteResponseMetaHeaders emits tok/s and ttft when generation window is known", () => {
+  const usage = { prompt_tokens: 11, completion_tokens: 20 };
+  const headers = buildOmniRouteResponseMetaHeaders({
+    provider: "openai",
+    model: "gpt-4o-mini",
+    latencyMs: 2000,
+    ttftMs: 500,
+    usage,
+    costUsd: 0,
+  });
+  assert.equal(headers["X-OmniRoute-Tokens-Per-Second"], "13.33");
+  assert.equal(headers["X-OmniRoute-Ttft-Ms"], "500");
+  assert.equal(usage.tokens_per_second, 13.3333);
+  assert.equal(usage.ttft_ms, 500);
+});
+
+test("buildOmniRouteResponseMetaHeaders uses full latency when TTFT is absent", () => {
+  const headers = buildOmniRouteResponseMetaHeaders({
+    provider: "openai",
+    model: "gpt-4o-mini",
+    latencyMs: 2000,
+    usage: { completion_tokens: 10 },
+  });
+  assert.equal(headers["X-OmniRoute-Tokens-Per-Second"], "5.00");
+  assert.equal(headers["X-OmniRoute-Ttft-Ms"], undefined);
 });

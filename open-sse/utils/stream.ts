@@ -1079,6 +1079,7 @@ export function createSSEStream(options: StreamOptions = {}) {
       model,
       cacheHit: false,
       latencyMs: Date.now() - streamStartedAt,
+      ttftMs: timing.ttftMs(),
       usage: finalUsage,
       costUsd,
     });
