@@ -157,37 +157,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-
-/**
- * Per-call knobs for {@link resolveCachedCatalogResponse}.
- *
- * `hideAutoCombos` / `hideNoThinkVariants` are catalog-shape dimensions folded into
- * the cache key. `getStaleWhileRevalidateMs` and `scheduleBackgroundRefresh` are the
- * injection points restored in #11551: the route wires Next's `after()` so the
- * background refresh runs only once the response has been flushed to the client.
- */
-
-/** Defers `task` until it is safe to run without delaying the current response. */
-
-/**
- * Default scheduler (#8728 / #11551).
- *
- * Next's `after()` runs the task once the response has been flushed, which is the
- * whole point of the stale-while-revalidate path: the builder is overwhelmingly
- * synchronous under the single-threaded App Router, so running it before the flush
- * pins the event loop and the "served immediately" stale body only reaches the
- * client after the rebuild finishes.
- *
- * `after()` requires a Next request scope. Callers outside one (instrumentation
- * warm-up, direct unit-test imports) fall back to a macrotask, which preserves the
- * "hand the response back first" ordering within the same process.
- */
-
-type CatalogInFlight = {
-  version: number;
-  promise: Promise<CachedCatalog>;
-};
-
 const catalogCache = new Map<string, CachedCatalog>();
 
 /**
@@ -342,6 +311,37 @@ function runBuilder(
   return buildPayload(request);
 }
 
+async function awaitCatalogInFlight(
+  cacheKey: string,
+  inflight: InFlightBuild,
+  corsHeaders: Record<string, string>,
+  diagnosticHeaders: Record<string, string>
+): Promise<Response> {
+  let payload: CachedCatalog;
+  try {
+    payload = await withTimeout(inflight.promise, catalogBuildTimeoutMs(), "catalog_build_timeout");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (catalogInFlight.get(cacheKey)?.promise === inflight.promise) {
+      catalogInFlight.delete(cacheKey);
+    }
+    const lastGood = catalogLastGood.get(cacheKey);
+    if (msg === "catalog_build_timeout" && lastGood) {
+      return new Response(lastGood.body, {
+        status: lastGood.status,
+        headers: mergeCatalogHeaders(corsHeaders, lastGood.headers, diagnosticHeaders, {
+          "x-omniroute-catalog": "last-good",
+        }),
+      });
+    }
+    throw err;
+  }
+  return new Response(payload.body, {
+    status: payload.status,
+    headers: mergeCatalogHeaders(corsHeaders, payload.headers, diagnosticHeaders),
+  });
+}
+
 /**
  * Resolve the cached catalog response for `request`, building it through
  * `buildPayload` when there is nothing fresh to serve.
@@ -406,25 +406,7 @@ export async function resolveCachedCatalogResponse(
     });
   }
 
-  let payload: CachedCatalog;
-  try {
-    payload = await withTimeout(inflight.promise, catalogBuildTimeoutMs(), "catalog_build_timeout");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (catalogInFlight.get(cacheKey)?.promise === inflight.promise) catalogInFlight.delete(cacheKey);
-    const lastGood = catalogLastGood.get(cacheKey);
-    if (msg === "catalog_build_timeout" && lastGood) {
-      return new Response(lastGood.body, {
-        status: lastGood.status,
-        headers: mergeCatalogHeaders(corsHeaders, lastGood.headers, diagnosticHeaders, { "x-omniroute-catalog": "last-good" }),
-      });
-    }
-    throw err;
-  }
-  return new Response(payload.body, {
-    status: payload.status,
-    headers: mergeCatalogHeaders(corsHeaders, payload.headers, diagnosticHeaders),
-  });
+  return awaitCatalogInFlight(cacheKey, inflight, corsHeaders, diagnosticHeaders);
 }
 
 // ── Test hooks ───────────────────────────────────────────────────────────────
