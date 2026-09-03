@@ -675,9 +675,20 @@ export function hasValidUsage(usage: UsageLike | null | undefined) {
 export function isEmptyUsage(usage: unknown): boolean {
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return true;
   const u = usage as Record<string, unknown>;
-  for (const k of ["prompt_tokens","completion_tokens","total_tokens","input_tokens","output_tokens","promptTokenCount","candidatesTokenCount","totalTokenCount"]) {
+  for (const k of [
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "promptTokenCount",
+    "candidatesTokenCount",
+    "totalTokenCount",
+  ]) {
     const v = u[k];
-    if (typeof v === "number" && Number.isFinite(v)) { if (v > 0) return false; }
+    if (typeof v === "number" && Number.isFinite(v)) {
+      if (v > 0) return false;
+    }
   }
   return true;
 }

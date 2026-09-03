@@ -197,10 +197,7 @@ export function buildOmniRouteResponseMetaHeaders({
     headers[OMNIROUTE_RESPONSE_HEADERS.decision] = decisionValue;
   }
 
-  let tps = tokensPerSecond(
-    tokens.output,
-    generationDurationMs(toFiniteNumber(latencyMs), ttftMs)
-  );
+  let tps = tokensPerSecond(tokens.output, generationDurationMs(toFiniteNumber(latencyMs), ttftMs));
   if (tps == null && usage && typeof usage === "object") {
     const fromUsage = toFiniteNumber((usage as Record<string, unknown>).tokens_per_second);
     if (fromUsage > 0) tps = fromUsage;

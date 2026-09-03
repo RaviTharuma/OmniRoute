@@ -5,7 +5,10 @@
  * first-token wait and is not generation speed. When TTFT is unknown (typical
  * non-streaming JSON), omit the field rather than guessing.
  */
-export function generationDurationMs(totalMs: number, ttftMs: number | null | undefined): number | null {
+export function generationDurationMs(
+  totalMs: number,
+  ttftMs: number | null | undefined
+): number | null {
   if (!Number.isFinite(totalMs) || totalMs <= 0) return null;
   if (ttftMs == null || !Number.isFinite(ttftMs) || ttftMs < 0) return null;
   const generationMs = totalMs - ttftMs;
