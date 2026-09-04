@@ -78,7 +78,7 @@ import {
 } from "@/lib/db/sessionAccountAffinity";
 import { dispatchChatWithAffinityEviction } from "./chatDispatch";
 import { getCachedSettings, getCombosCacheVersion } from "@/lib/db/readCache";
-import { catalogContainsModel, getActiveSyncedCatalog } from "@/lib/db/models/activeSyncedCatalog";
+import { comboCheckProvider, ghComboGate } from "./chat/githubLiveCatalogFilter.ts";
 import { getCombos } from "@/lib/db/combos";
 import { resolveModelLockoutSettings } from "@/lib/resilience/modelLockoutSettings";
 import {
@@ -980,20 +980,6 @@ async function handleChatImplementation(
     // Pre-check function used by combo routing. For explicit combo live tests,
     // avoid pre-skipping so each model gets a real execution attempt.
     const comboPreselectedCredentials = new Map<string, any>();
-    // #12137: memoize GitHub live catalog once per request so combo candidates
-    // reuse a single getActiveSyncedCatalog fetch instead of re-hitting DB.
-    const githubLiveCatalogByProvider = new Map<
-      string,
-      ReturnType<typeof getActiveSyncedCatalog>
-    >();
-    const getGithubLiveCatalog = (providerId: string) => {
-      let pending = githubLiveCatalogByProvider.get(providerId);
-      if (!pending) {
-        pending = getActiveSyncedCatalog(providerId);
-        githubLiveCatalogByProvider.set(providerId, pending);
-      }
-      return pending;
-    };
     const getComboCredentialCacheKey = (
       modelString: string,
       target?: { connectionId?: string | null; executionKey?: string | null }
@@ -1040,27 +1026,10 @@ async function handleChatImplementation(
         if (isCommonChatGptWebRetirementError(error)) return false;
         throw error;
       }
-      // Apply the same prefix-override guard as handleSingleModelChat:
-      // if providerId is just the prefix already in the model string, use
-      // the fully-resolved modelInfo.provider for a precise credential check.
-      const provider = (() => {
-        if (!target?.providerId) return modelInfo.provider;
-        if (target.providerId === modelInfo.provider) return modelInfo.provider;
-        if (modelString.startsWith(target.providerId + "/")) return modelInfo.provider;
-        return target.providerId;
-      })();
-      if (!provider) return true; // can't determine provider, let it try
-
+      const provider = comboCheckProvider(modelString, modelInfo, target?.providerId);
       const resolvedModel = modelInfo.model || modelString;
-      // #12137: explicit combo members vs GitHub live catalog. Fail open when
-      // nothing has been synced yet (same pattern as providerWildcard).
-      if (provider === "github" || provider === "gh") {
-        const inLiveCatalog = catalogContainsModel(
-          await getGithubLiveCatalog(provider),
-          resolvedModel
-        );
-        if (inLiveCatalog === false) return false;
-      }
+      const githubGate = await ghComboGate(comboPreselectedCredentials, provider, resolvedModel);
+      if (githubGate !== null) return githubGate;
       const hasForcedConnection =
         typeof target?.connectionId === "string" && target.connectionId.trim().length > 0;
       let allowedConnections = intersectAllowedConnectionIds(
