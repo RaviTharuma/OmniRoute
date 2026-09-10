@@ -10,7 +10,10 @@ export type QuotaSkipTarget = {
   provider?: string;
   model?: string;
   modelStr?: string;
-  connectionId?: string;
+  // `string | null`, not `string | undefined`: ResolvedComboTarget carries null for an
+  // unpinned target, and this module only reads the field. Line 29 already narrows with
+  // `typeof === "string"`, so null costs nothing here (TS2345 under typecheck:core).
+  connectionId?: string | null;
 };
 
 export type QuotaSkipExclusion = {
