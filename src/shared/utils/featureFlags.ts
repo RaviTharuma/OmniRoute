@@ -272,6 +272,40 @@ export function isOpencodeTransientFailoverBackoffEnabled(): boolean {
   }
 }
 
+/**
+ * Mistral bare-401 bounded soft lockout (#13609). Opt-in: when off, a bare Mistral 401 parks
+ * the connection as expired exactly as before.
+ * Fail closed: an unreadable flag store keeps the pre-flag behavior (disabled).
+ */
+export function isMistralAmbiguous401SoftLockoutEnabled(): boolean {
+  try {
+    return isFeatureFlagEnabled("MISTRAL_AMBIGUOUS_401_SOFT_LOCKOUT");
+  } catch (error) {
+    console.error(
+      "[featureFlags] Failed to resolve MISTRAL_AMBIGUOUS_401_SOFT_LOCKOUT, defaulting to disabled:",
+      error instanceof Error ? error.message : error
+    );
+    return false;
+  }
+}
+
+/**
+ * OpenCode classified-429 early stop (#13657). Opt-in: when off, every 429 rotates to the
+ * next account exactly as before.
+ * Fail closed: an unreadable flag store keeps the pre-flag behavior (disabled).
+ */
+export function isOpencodeRateLimited429EarlyStopEnabled(): boolean {
+  try {
+    return isFeatureFlagEnabled("OPENCODE_RATE_LIMITED_429_EARLY_STOP");
+  } catch (error) {
+    console.error(
+      "[featureFlags] Failed to resolve OPENCODE_RATE_LIMITED_429_EARLY_STOP, defaulting to disabled:",
+      error instanceof Error ? error.message : error
+    );
+    return false;
+  }
+}
+
 export function isServerOwnedToolLoopEnabled(
   reader: (key: string) => boolean = isFeatureFlagEnabled
 ): boolean {
