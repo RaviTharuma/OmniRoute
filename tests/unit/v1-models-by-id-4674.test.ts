@@ -82,7 +82,9 @@ test("handleGetModelById returns 404 JSON (not HTML) for an unknown model", asyn
   assert.doesNotMatch(ct, /text\/html/);
   const body = await res.json();
   assert.equal(body.error.code, "model_not_found");
+  assert.equal(body.error.param, "model");
   assert.match(body.error.message, /ghost/);
+  assert.match(body.error.message, /\/v1\/models catalog/);
 });
 
 test("handleGetModelById propagates an upstream auth/error response unchanged", async () => {

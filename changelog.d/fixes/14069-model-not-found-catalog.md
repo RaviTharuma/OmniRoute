@@ -1,0 +1,1 @@
+- **fix(api):** `GET /v1/models/{id}` returns a clear `model_not_found` payload (catalog miss, `param: model`) instead of an opaque combo 503 ([#14069](https://github.com/diegosouzapw/OmniRoute/pull/14069)) — thanks @RaviTharuma

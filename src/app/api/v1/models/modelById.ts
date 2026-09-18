@@ -1,4 +1,5 @@
 import { CORS_HEADERS } from "@/shared/utils/cors";
+import { buildModelNotFoundPayload } from "@/lib/model-not-found";
 
 /**
  * #4674 — Shared logic for `GET /v1/models/{model}`.
@@ -59,14 +60,8 @@ export async function handleGetModelById(
     return Response.json(found, { headers: CORS_HEADERS });
   }
 
-  return Response.json(
-    {
-      error: {
-        message: `The model '${requestedId}' does not exist`,
-        type: "invalid_request_error",
-        code: "model_not_found",
-      },
-    },
-    { status: 404, headers: CORS_HEADERS }
-  );
+  return Response.json(buildModelNotFoundPayload(requestedId), {
+    status: 404,
+    headers: CORS_HEADERS,
+  });
 }
