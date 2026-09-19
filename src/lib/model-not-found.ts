@@ -25,12 +25,3 @@ export function buildModelNotFoundPayload(modelId: string): ModelNotFoundPayload
     },
   };
 }
-
-export function isKnownModelId(modelId: string, liveCatalogIds: ReadonlySet<string>): boolean {
-  const needle = modelId.trim().toLowerCase();
-  if (!needle) return false;
-  for (const id of liveCatalogIds) {
-    if (id.trim().toLowerCase() === needle) return true;
-  }
-  return false;
-}
