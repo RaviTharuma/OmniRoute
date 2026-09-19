@@ -6852,8 +6852,8 @@
       "globalModeDesc": "Tất cả lưu lượng truy cập của Nhà cung cấp đều đi qua nhóm proxy của đăng ký này.",
       "ruleModeDesc": "Chỉ lưu lượng truy cập của Nhà cung cấp được chọn mới đi qua proxy; phần còn lại kết nối trực tiếp.",
       "localCoreEndpoint": "Điểm cuối lõi cục bộ SOCKS5/HTTP (Tùy chọn)",
-      "localCoreEndpointPlaceholder": "vớ5://127.0.0.1:1080",
-      "localCoreEndpointDesc": "Chỉ chấp nhận 127.0.0.1 / localhost (SS/VMess/Trojan/VLESS yêu cầu sing-box/lõi xung đột cục bộ).",
+      "localCoreEndpointPlaceholder": "socks5://127.0.0.1:1080\nsocks5://127.0.0.1:1081",
+      "localCoreEndpointDesc": "Mỗi dòng một địa chỉ. Chỉ chấp nhận 127.0.0.1 / localhost (SS/VMess/Trojan/VLESS yêu cầu sing-box/lõi xung đột cục bộ).",
       "routeByProvider": "Định tuyến theo Nhà cung cấp (nhiều lựa chọn)",
       "loadingProviders": "Đang tải danh sách Nhà cung cấp…",
       "autoRefreshInterval": "Khoảng thời gian làm mới tự động (phút)",
@@ -11411,6 +11411,7 @@
         "clientResponse": "Phản hồi client",
         "pipelineError": "Lỗi Pipeline"
       },
+      "payloadSizeLimitOmitted": "Đã bỏ qua payload — phần này vượt quá giới hạn kích thước nhật ký cuộc gọi (CALL_LOG_PIPELINE_MAX_SIZE_KB) nên không được lưu; đây không phải lỗi thực sự từ upstream.",
       "payloadMissing": "Không còn artifact payload chi tiết cho mục nhật ký này.",
       "payloadCorrupt": "Không thể phân tích artifact payload chi tiết.",
       "notAvailable": "Không áp dụng",

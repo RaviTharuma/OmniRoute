@@ -1293,6 +1293,9 @@
     "mainNavigation": "Navigasi utama",
     "unpinSection": "Lepas sematan bagian",
     "pinSectionOpen": "Sematkan bagian agar tetap terbuka",
+    "pinItem": "Sematkan item",
+    "unpinItem": "Lepas sematan item",
+    "pinnedSection": "Disematkan",
     "reloadPage": "Muat Ulang Halaman",
     "dragReorderSection": "Seret untuk menyusun ulang bagian",
     "dragReorderItem": "Seret untuk menyusun ulang",
@@ -11411,6 +11414,7 @@
         "clientResponse": "Tanggapan Klien",
         "pipelineError": "Kesalahan Pipeline"
       },
+      "payloadSizeLimitOmitted": "Payload dihilangkan — bagian ini melampaui batas ukuran log panggilan (CALL_LOG_PIPELINE_MAX_SIZE_KB) dan tidak disimpan; ini bukan kesalahan upstream yang sebenarnya.",
       "payloadMissing": "Artifact payload yang terperinci tidak lagi tersedia untuk entri log ini.",
       "payloadCorrupt": "Artifact payload yang rinci tidak dapat diparsing.",
       "notAvailable": "T/A",
