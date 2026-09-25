@@ -4,6 +4,12 @@
 ## Testing (HARD)
 Sources: https://x.com/anshnanda/status/2101627891721371971 · https://x.com/nimsbh_ai/status/2102083469362790401 · https://x.com/imrobertjames/status/2100787901701456057
 
+## Credentials / account health (HARD)
+- Health flaps and temporary unpaid/billing lapses are **alerts only** — never auto-set `is_active=0`.
+- `credits_exhausted` / unpaid is **not terminal forever**: keep `is_active=1`, record informative `testStatus` for selection skip + alerts, and let connection recovery / re-probe clear it after billing renew so influencers pick the account up without an OmniRoute UI re-enable.
+- Permanent ban deactivation (`is_active=0`) is opt-in only via `autoDisableBannedAccounts` (+ scope). Do not ungated-flip `isActive` in chatCore / OAuth refresh death / `writeTerminalStatus` defaults.
+- The credential health scheduler must remain non-deactivating (refresh / observe only).
+
 - NEVER write unit tests after you write code.
 - Highly prefer E2E tests as the sole testing mechanism. Use them to verify complex features work. At the end of E2E tests, produce a verifiable and repeatable artifact.
 - If you must test a system in isolation, FIRST write down all the ways it could fail, THEN write the code.
@@ -209,9 +215,13 @@ baseCooldownMs * 2 ** failureIndex;
 The anti-thundering-herd guard prevents concurrent failures on the same connection from
 repeatedly extending the cooldown or double-incrementing `backoffLevel`.
 
-Terminal states are not cooldowns. `banned`, `expired`, and `credits_exhausted` are
-intended to stay unavailable until credentials/settings change or an operator resets
-them. Do not overwrite terminal states with transient cooldown state.
+Terminal states are not cooldowns. `banned` and `expired` stay unavailable until
+credentials/settings change or an operator resets them — and even then, flipping
+`is_active=0` is opt-in via `autoDisableBannedAccounts` (see Credentials HARD).
+`credits_exhausted` / temporary unpaid is **selection-skip + alert**, not a forever
+lock and **never** an auto `is_active=0`: connection recovery re-probes on a timer so
+unpaid→renew returns the account to rotation without a UI re-enable. Do not overwrite
+true terminal states with transient cooldown state.
 
 ### Model Lockout
 
