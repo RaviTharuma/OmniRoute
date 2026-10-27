@@ -1,0 +1,1 @@
+- **fix(i18n):** zh-CN quotaAuthRequiredHint uses the canonical provider term 提供者 ([#18392](https://github.com/diegosouzapw/OmniRoute/pull/18392)) — thanks @RaviTharuma
