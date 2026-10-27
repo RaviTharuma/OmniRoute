@@ -16,6 +16,15 @@ const { hasIdenticalModelErrorStreak } =
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const noop = () => {};
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+const { handleComboChat } = await import("../../open-sse/services/combo.ts");
+const log = { info: noop, warn: noop, error: noop, debug: noop };
+const overflow = () =>
+  new Response(
+    JSON.stringify({
+      error: { code: "context_length_exceeded", message: "Input exceeds context window" },
+    }),
+    { status: 400, headers: { "content-type": "application/json" } }
+  );
 async function run(mode: string, hedge = true) {
   const dispatched: number[] = [],
     cancelled: number[] = [];
@@ -117,15 +126,6 @@ test("duplicate conflicts are not malformed request evidence", () => {
     true
   );
 });
-const { handleComboChat } = await import("../../open-sse/services/combo.ts");
-const log = { info: noop, warn: noop, error: noop, debug: noop };
-const overflow = () =>
-  new Response(
-    JSON.stringify({
-      error: { code: "context_length_exceeded", message: "Input exceeds context window" },
-    }),
-    { status: 400, headers: { "content-type": "application/json" } }
-  );
 test("real classifier: last-model context overflow leaves earlier hedge alive", async () => {
   const called: string[] = [];
   const response = await handleComboChat({
