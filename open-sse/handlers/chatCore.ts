@@ -1566,7 +1566,7 @@ async function handleChatCoreInner({
         // #3890: in a caching context, never compress the system prompt (cacheable prefix)
         // even if the operator disabled preserveSystemPrompt — honors the cache-aware flag
         // that selectCompressionStrategy can only partially apply via the mode string.
-        const cacheCtx = {
+        const cacheCtx: import("../services/compression/cachingAware.ts").CachingDetectionContext = {
           provider,
           targetFormat,
           model: effectiveModel,
