@@ -369,6 +369,7 @@ async function handleChatCoreInner({
   correlationId = null,
   conversationId = null,
   modelPinned = false,
+  strictModelRouting = false,
   skipResourcePressureGuard = false,
   reasoningTransportFallback = "drop",
   managedLease = null,
@@ -655,7 +656,7 @@ async function handleChatCoreInner({
     headers: clientRawRequest?.headers,
     model,
   });
-  if (bgRedirect) {
+  if (bgRedirect && !strictModelRouting) {
     const originalModel = model;
     log?.info?.(
       "BACKGROUND",
@@ -678,15 +679,17 @@ async function handleChatCoreInner({
     });
   }
 
-  const ca = await resolveCopilotAuto(provider, model, body, credentials, sessionAffinityKey, log);
+  const ca = strictModelRouting
+    ? { model, credentials, errorResult: null }
+    : await resolveCopilotAuto(provider, model, body, credentials, sessionAffinityKey, log);
   if (ca.errorResult) return ca.errorResult;
   ({ model, credentials } = ca);
-  // Custom aliases remain explicit; lifecycle replacements are advisory and never silently routed.
-  let [resolvedModel, effectiveModel, routedLifecycleError] = resolveLifecycle(
-    provider,
-    model,
-    log
-  );
+
+  // Strict combo targets are concrete routing decisions. Lifecycle aliases can
+  // cross model versions, so only validate the declared target in strict mode.
+  let [resolvedModel, effectiveModel, routedLifecycleError] = strictModelRouting
+    ? [model, model, checkLifecycle(provider, model, log)]
+    : resolveLifecycle(provider, model, log);
   if (routedLifecycleError) return routedLifecycleError;
 
   // Effort-variant model ids: the Claude / Claude-Code model picker (e.g. VS Code's
@@ -702,7 +705,7 @@ async function handleChatCoreInner({
   // original behavior) for the claude/Claude-Code-compatible lane; for any other provider it
   // additionally requires isKnownClaudeEffortBaseModel(baseModel) to verify the base id is a
   // real, effort-capable Claude model before stripping (vertex-claude-catalog-dispatch fix).
-  {
+  if (!strictModelRouting) {
     const effortVariant = applyClaudeEffortVariant({
       provider,
       effectiveModel,
@@ -1031,7 +1034,8 @@ async function handleChatCoreInner({
   body = applyApiKeyCodexServiceMode(provider, body, apiKeyCodexServiceMode);
   effectiveServiceTier = resolveEffectiveServiceTier(body);
   setGeminiThoughtSignatureMode(settings.antigravitySignatureCacheMode);
-  const semanticCacheEnabled = isSemanticCacheEnabled(settings, apiKeyInfo);
+  // Strict targets cannot consume or populate a response cached under another model.
+  const semanticCacheEnabled = isSemanticCacheEnabled(settings, apiKeyInfo) && !strictModelRouting;
 
   const reqLogger = await createRequestLogger(sourceFormat, targetFormat, model, {
     enabled: detailedLoggingEnabled && !videoBridgeObserved,
@@ -2473,6 +2477,7 @@ async function handleChatCoreInner({
     resilienceSettings,
     settings,
     skipUpstreamRetry,
+    strictModelRouting,
     stream,
     streamController,
     targetFormat,

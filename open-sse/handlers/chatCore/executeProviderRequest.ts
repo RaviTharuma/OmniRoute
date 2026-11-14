@@ -140,6 +140,7 @@ export type ExecuteProviderRequestDeps = {
   settings: Record<string, unknown> | null | undefined;
   toolDisclosure?: ToolDisclosureConfig | null;
   skipUpstreamRetry: boolean;
+  strictModelRouting: boolean;
   stream: boolean;
   streamController: { signal: AbortSignal };
   targetFormat: string;
@@ -186,6 +187,7 @@ export async function executeProviderRequest(
     resilienceSettings,
     settings,
     skipUpstreamRetry,
+    strictModelRouting,
     stream,
     streamController,
     targetFormat,
@@ -346,6 +348,7 @@ export async function executeProviderRequest(
                         body: bodyToSend,
                         stream: upstreamStream,
                         credentials: execCreds,
+                        strictModelRouting,
                         signal,
                         log,
                         extendedContext,
@@ -552,6 +555,7 @@ export async function executeProviderRequest(
                             body,
                             stream: upstreamStream,
                             credentials: execCreds,
+                            strictModelRouting,
                             signal,
                             log,
                             extendedContext,

@@ -167,9 +167,26 @@ export const responseValidationSchema = z
   })
   .strict();
 
+export const managedModelFamilySchema = z
+  .object({
+    family: z.string().trim().min(1).max(100),
+    mode: z.enum(["latest", "exact"]),
+    providers: z.array(z.string().trim().min(1).max(100)).min(1).max(20),
+    version: z.string().trim().min(1).max(50).optional(),
+  })
+  .strict()
+  .refine((rule) => rule.mode !== "exact" || Boolean(rule.version), {
+    message: "version is required for exact managed model-family routing",
+    path: ["version"],
+  });
+
 export const comboRuntimeConfigSchema = z
   .object({
     responseValidation: responseValidationSchema.optional(),
+    // Fail closed: the declared combo target sequence is the only authority allowed
+    // to change models. Provider/account retries for the current target remain enabled.
+    strictModelRouting: z.boolean().optional(),
+    managedModelFamily: managedModelFamilySchema.optional(),
     strategy: comboStrategySchema.optional(),
     maxRetries: z.coerce.number().int().min(0).max(10).optional(),
     retryDelayMs: z.coerce.number().int().min(0).max(60000).optional(),

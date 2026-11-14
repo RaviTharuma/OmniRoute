@@ -39,7 +39,11 @@ export async function GET(request: Request) {
       ...combo,
       computed_context_length: computeComboContextLength(combo, rawCombos, resolution),
     }));
-    return NextResponse.json({ combos, total });
+    return NextResponse.json({
+      combos,
+      total,
+      capabilities: { strictModelRouting: true },
+    });
   } catch (error) {
     console.log("Error fetching combos:", error);
     return NextResponse.json({ error: "Failed to fetch combos" }, { status: 500 });

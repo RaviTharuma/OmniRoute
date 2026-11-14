@@ -569,6 +569,7 @@ type AntigravityAttemptContext = {
   fallbackCount: number;
   physicalSendCounter: AntigravityPhysicalSendCounter;
   correlationId: string | null;
+  strictModelRouting: boolean;
 };
 
 /** Context threaded through the 429/503 handling helpers — adds the sent response. */
@@ -1231,19 +1232,20 @@ export class AntigravityExecutor extends BaseExecutor {
     const physicalSendCounter: AntigravityPhysicalSendCounter = { value: 0 };
     await resolveAntigravityClientVersion(getAntigravityClientProfile(input.credentials));
 
-    // Look up the chain by the NORMALLY-resolved upstream id (honours MITM/static aliases).
-    // If a MITM alias remapped the id away from a known Pro tier, no chain applies → fast path.
-    const resolvedUpstreamId = await cleanModelName(
-      input.model,
-      undefined,
-      this.provider,
-      input.credentials.connectionId
-    );
-    const chain = getAntigravityModelFallbacks(resolvedUpstreamId);
+    // Strict combo targets must reach the exact declared upstream id. Dynamic/static
+    // aliases and per-request model fallback chains are disabled; provider/account
+    // retries remain owned by the surrounding routing pipeline.
+    const resolvedUpstreamId = input.strictModelRouting
+      ? input.model
+      : await cleanModelName(input.model, undefined, this.provider, input.credentials.connectionId);
+    const chain = input.strictModelRouting ? [] : getAntigravityModelFallbacks(resolvedUpstreamId);
 
     if (chain.length <= 1) {
-      // No fallback chain (flash, claude, plain pro, unknown) → single attempt, unchanged.
-      return this.executeOnce(input, undefined, physicalSendCounter);
+      return this.executeOnce(
+        input,
+        input.strictModelRouting ? resolvedUpstreamId : undefined,
+        physicalSendCounter
+      );
     }
 
     let firstResult: Awaited<ReturnType<AntigravityExecutor["executeOnce"]>> | null = null;
@@ -1314,6 +1316,7 @@ export class AntigravityExecutor extends BaseExecutor {
       log,
       upstreamExtraHeaders,
       correlationId = null,
+      strictModelRouting = false,
     }: ExecuteInput,
     modelIdOverride?: string,
     physicalSendCounter: AntigravityPhysicalSendCounter = { value: 0 }
@@ -1385,6 +1388,7 @@ export class AntigravityExecutor extends BaseExecutor {
           fallbackCount,
           physicalSendCounter,
           correlationId,
+          strictModelRouting,
         });
 
         if (outcome.action === "return") return outcome.result;
@@ -1451,6 +1455,7 @@ export class AntigravityExecutor extends BaseExecutor {
       retryAttemptsByUrl,
       physicalSendCounter,
       correlationId,
+      strictModelRouting,
     } = ctx;
 
     const { response, finalHeaders } = await sendAntigravityRequest(
@@ -1465,7 +1470,8 @@ export class AntigravityExecutor extends BaseExecutor {
       log,
       retryAttemptsByUrl[urlIndex],
       physicalSendCounter,
-      correlationId
+      correlationId,
+      strictModelRouting
     );
 
     let retryMs: number | null = null;

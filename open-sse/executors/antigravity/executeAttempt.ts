@@ -325,7 +325,8 @@ export async function sendAntigravityRequest(
   log: SafeAntigravityLog,
   retryAttempt: number,
   physicalSendCounter: { value: number },
-  correlationId: string | null
+  correlationId: string | null,
+  strictModelRouting = false
 ): Promise<{ response: Response; finalHeaders: Record<string, string> }> {
   const serializedRequest = serializeAntigravityRequest(provider, headers, transformedBody);
   let finalHeaders = serializedRequest.headers;
@@ -401,12 +402,9 @@ export async function sendAntigravityRequest(
           // module) forms an async ESM init cycle that deadlocks the bundled MCP server
           // on startup (tests/unit/build/mcp-bundle-startup.test.ts).
           const { cleanModelName } = await import("../antigravity.ts");
-          const reResolvedModel = await cleanModelName(
-            model,
-            undefined,
-            provider,
-            credentials.connectionId
-          );
+          const reResolvedModel = strictModelRouting
+            ? model
+            : await cleanModelName(model, undefined, provider, credentials.connectionId);
           const retryBody: Record<string, unknown> = {
             ...transformedBody,
             model: reResolvedModel,

@@ -318,6 +318,61 @@ OmniRoute's combo engine supports **20 routing strategies** (declared in `src/sh
 
 ⭐ = New in v3.8.0 · 🧬 = New in v3.8.36
 
+### Strict declared-model routing
+
+Persisted combos may set `config.strictModelRouting: true` when their declared target sequence
+must be the only authority allowed to change models. Provider and account failover still run for
+the exact model on each target. OmniRoute does not apply task-aware, web-search, reasoning,
+lifecycle, background-task, semantic-cache, global, or intra-family model substitutions, and it
+does not reorder later requests from a prior winner.
+
+For a version-pinned leaf, list the same exact model once per permitted provider/account. For a
+family alias such as `claude-opus/latest`, use nested strict priority combos: one child per version,
+with all permitted providers for the newest version before the child for the previous version.
+Strictness is inherited by nested targets, so a strict parent cannot be weakened by a child.
+
+```json
+{
+  "name": "claude-opus-5-5",
+  "strategy": "priority",
+  "config": { "strictModelRouting": true },
+  "models": [
+    { "kind": "model", "model": "claude/claude-opus-5-5" },
+    { "kind": "model", "model": "antigravity/claude-opus-5-5" },
+    { "kind": "model", "model": "github/claude-opus-5-5" }
+  ]
+}
+```
+
+When every declared target fails, the combo returns the aggregated upstream failure. It does not
+invoke `globalFallbackModel` or an undeclared older model.
+
+Catalog-managed families may instead set `config.managedModelFamily` with `family`, `mode`, and
+an ordered `providers` list. `mode: "latest"` derives the newest version exclusively from fresh
+synced provider catalogs, then preserves provider order within that version. `mode: "exact"`
+also requires `version` and returns only that version. Missing, stale, malformed, or unsupported
+catalog entries produce no candidate; OmniRoute never manufactures model IDs or silently maps an
+exact request to another version. Example:
+
+```json
+{
+  "name": "claude-opus/latest",
+  "strategy": "priority",
+  "config": {
+    "managedModelFamily": {
+      "family": "claude-opus",
+      "mode": "latest",
+      "providers": ["claude", "antigravity", "github"]
+    }
+  },
+  "models": [{ "kind": "model", "model": "claude/claude-opus-placeholder" }]
+}
+```
+
+The persisted placeholder only satisfies the combo storage contract; it is never dispatched.
+At request time the managed rule replaces it with catalog-proven concrete targets and enables
+strict routing for the resulting sequence. Unrelated combos and model aliases are unchanged.
+
 ### `weighted` semantics
 
 `weighted` is a **proportional random draw per request**

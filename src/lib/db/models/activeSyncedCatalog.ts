@@ -326,7 +326,10 @@ type ConnectionCatalog = {
   hasFreshConnection: boolean;
 };
 
-async function loadConnectionCatalog(storedProviderId: string): Promise<ConnectionCatalog> {
+async function loadConnectionCatalog(
+  storedProviderId: string,
+  freshModelsOnly = false
+): Promise<ConnectionCatalog> {
   const [connections, modelsByConnection] = await Promise.all([
     getRawProviderConnections(
       { provider: storedProviderId, isActive: true },
@@ -341,21 +344,25 @@ async function loadConnectionCatalog(storedProviderId: string): Promise<Connecti
     .map(readConnectionRef)
     .filter((connection): connection is ProviderConnectionRef => connection !== null);
 
+  const freshConnections = activeConnections.filter((connection) =>
+    isSyncedAtFresh(connection.syncedModelsAt)
+  );
+  const catalogConnections = freshModelsOnly ? freshConnections : activeConnections;
   return {
     models: collectModelsForConnections(
       modelsByConnection,
-      activeConnections.map((connection) => connection.id)
+      catalogConnections.map((connection) => connection.id)
     ),
-    hasFreshConnection: activeConnections.some((connection) =>
-      isSyncedAtFresh(connection.syncedModelsAt)
-    ),
+    hasFreshConnection: freshConnections.length > 0,
   };
 }
 
 /** Set includeCustomModels=false for consumers that overlay custom rows separately. */
 export async function getActiveSyncedCatalog(
   providerId: string,
-  includeCustomModels = true
+  includeCustomModels = true,
+  includeRegistryDispatchModels = true,
+  freshModelsOnly = false
 ): Promise<ActiveSyncedCatalog> {
   const storedProviderId = resolveStoredProviderId(providerId);
   if (!storedProviderId) {
@@ -364,17 +371,19 @@ export async function getActiveSyncedCatalog(
 
   try {
     const lookupIds = catalogLookupIds(storedProviderId);
-    const siblingCatalogs = await Promise.all(lookupIds.map(loadConnectionCatalog));
+    const siblingCatalogs = await Promise.all(
+      lookupIds.map((providerId) => loadConnectionCatalog(providerId, freshModelsOnly))
+    );
     // #12866 unions the agy/antigravity sibling catalogs; registry models with
     // explicit dispatch intent join before #12934 overlays the picker-added
     // customModels, so dispatch admits the same rows the picker REST shows.
     const discovered = unionModels(siblingCatalogs.map((catalog) => catalog.models));
-    const withRegistryDispatch = unionRegistryDispatchModels(storedProviderId, discovered);
+    const dispatchable = includeRegistryDispatchModels
+      ? unionRegistryDispatchModels(storedProviderId, discovered)
+      : discovered;
     const models = enrichCursorCatalog(
       storedProviderId,
-      includeCustomModels
-        ? await unionCustomModels(storedProviderId, withRegistryDispatch)
-        : withRegistryDispatch,
+      includeCustomModels ? await unionCustomModels(storedProviderId, dispatchable) : dispatchable,
       includeCustomModels
     );
     if (models.length > 0) {

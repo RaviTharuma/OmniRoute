@@ -133,10 +133,16 @@ export async function executeComboRefUnit(args: {
     childComboName: childCombo.name,
   });
   if (childNesting instanceof Response) return childNesting;
+  const inheritedStrict = args.unit.strictModelRouting === true;
   return args.runCombo({
     ...args.baseOptions,
     body: args.body,
-    combo: childCombo,
+    combo: inheritedStrict
+      ? {
+          ...childCombo,
+          config: { ...(childCombo.config || {}), strictModelRouting: true },
+        }
+      : childCombo,
     nesting: childNesting,
   });
 }

@@ -42,6 +42,11 @@ import {
   shouldSkipConnDisable,
 } from "@omniroute/open-sse/services/combo.ts";
 import type { ComboLike, SingleModelTarget } from "@omniroute/open-sse/services/combo/types.ts";
+import {
+  resolveManagedModelFamilyTargets,
+  type ManagedModelFamilyCatalogs,
+  type ManagedModelFamilyRule,
+} from "@omniroute/open-sse/services/combo/managedModelFamily.ts";
 import { mergeAbortSignals } from "@omniroute/open-sse/executors/base.ts";
 import { resolveRequestAutoControls } from "@omniroute/open-sse/services/autoCombo/requestControls.ts";
 import { isVerifiedNativeCodexRequest } from "@omniroute/open-sse/config/codexIdentity.ts";
@@ -89,6 +94,7 @@ import { evaluateComboTargetPreflight } from "./chat/comboTargetKeyPolicy.ts";
 import * as resolvedPolicy from "./chat/resolvedModelPolicy.ts";
 import { recordGateRejection, recordQuotaParkedSkip } from "./quotaParkedSkipUsage";
 import { getCombos } from "@/lib/db/combos";
+import { getActiveSyncedCatalog } from "@/lib/db/models/activeSyncedCatalog";
 import { resolveModelLockoutSettings } from "@/lib/resilience/modelLockoutSettings";
 import {
   ensureOpenAIStoreSessionFallback,
@@ -1007,6 +1013,15 @@ async function handleChatImplementation(
     }
   }
 
+  // Resolve an explicitly strict stored combo before any automatic router can
+  // replace its model. Its declared target sequence remains the sole authority.
+  const requestedCombo = await getComboForModel(modelStr);
+  const strictRequestedCombo =
+    requestedCombo?.config?.strictModelRouting === true ||
+    requestedCombo?.config?.managedModelFamily
+      ? requestedCombo
+      : null;
+
   // T09 — Pre-request Middleware Hooks
   // Execute user-defined hooks BEFORE task-aware routing and combo selection
   initPreRequestRegistry();
@@ -1026,13 +1041,18 @@ async function handleChatImplementation(
 
   // Apply hook mutations
   body = hookCtx.body as any;
-  ({ body, modelStr } = RoutingModelOps.reconcileModelOverride({
-    body,
-    modelStr,
-    overrideModel: hookCtx.model,
-    logTag: "Hook model override",
-    log,
-  }));
+  if (strictRequestedCombo) {
+    body = hookCtx.body as any;
+    body = RoutingModelOps.align(body, modelStr, log);
+  } else {
+    ({ body, modelStr } = RoutingModelOps.reconcileModelOverride({
+      body,
+      modelStr,
+      overrideModel: hookCtx.model,
+      logTag: "Hook model override",
+      log,
+    }));
+  }
 
   // Short-circuit if a hook returned a direct response
   if (hookResponse) {
@@ -1050,7 +1070,7 @@ async function handleChatImplementation(
   // Detect the semantic task type and optionally route to the optimal model
   let resolvedModelStr = modelStr;
   let taskRouteInfo: { taskType: string; wasRouted: boolean } | null = null;
-  if (getTaskRoutingConfig().enabled) {
+  if (!strictRequestedCombo && getTaskRoutingConfig().enabled) {
     telemetry.startPhase("task-route");
     const tr = applyTaskAwareRouting(modelStr, body);
     if (tr.wasRouted) {
@@ -1072,7 +1092,7 @@ async function handleChatImplementation(
   // model (some providers don't implement Anthropic's web_search_20250305 server tool).
   // Settings are read only when a web-search tool is present; the override lands before
   // auto/combo resolution and the layer-1 fallback so the target's own handling applies.
-  if (hasNativeWebSearchTool(body)) {
+  if (!strictRequestedCombo && hasNativeWebSearchTool(body)) {
     const wsSettings = await getCachedSettings().catch(() => ({}) as Record<string, unknown>);
     const wsRoute = resolveWebSearchRouteOverride(resolvedModelStr, body, wsSettings);
     if (wsRoute.wasRouted) {
@@ -1089,26 +1109,30 @@ async function handleChatImplementation(
   // combo/provider resolution. Existing behavior is untouched when no rule matches.
   let reasoningDecision: ReasoningRuleDecision | null = null;
   let requestRoutingTags: { tags: string[] } = { tags: [] };
-  const reasoningRouting = await applyReasoningRouting({
-    request,
-    body,
-    modelStr: resolvedModelStr,
-    policy,
-    apiKeyInfo,
-    reasoningIntent,
-  });
-  if (reasoningRouting.response) return reasoningRouting.response;
-  body = reasoningRouting.body;
-  resolvedModelStr = reasoningRouting.modelStr;
-  reasoningDecision = reasoningRouting.reasoningDecision;
-  requestRoutingTags = reasoningRouting.requestRoutingTags;
+  if (!strictRequestedCombo) {
+    const reasoningRouting = await applyReasoningRouting({
+      request,
+      body,
+      modelStr: resolvedModelStr,
+      policy,
+      apiKeyInfo,
+      reasoningIntent,
+    });
+    if (reasoningRouting.response) return reasoningRouting.response;
+    body = reasoningRouting.body;
+    resolvedModelStr = reasoningRouting.modelStr;
+    reasoningDecision = reasoningRouting.reasoningDecision;
+    requestRoutingTags = reasoningRouting.requestRoutingTags;
+  }
 
-  const autoRouting = await resolveAutoRoutingState(resolvedModelStr);
+  const autoRouting = strictRequestedCombo
+    ? await resolveAutoRoutingState("__strict_combo__")
+    : await resolveAutoRoutingState(resolvedModelStr);
   if (autoRouting.response) return autoRouting.response;
 
   // Check if model is a combo (has multiple models with fallback)
   telemetry.startPhase("resolve");
-  let combo: any = await getComboForModel(resolvedModelStr);
+  let combo: any = strictRequestedCombo ?? (await getComboForModel(resolvedModelStr));
   if (reasoningDecision?.targetCombo) combo = reasoningDecision.targetCombo;
 
   // "auto" prefix fuzzy matching: "auto/fast" → "auto/best-fast", etc.
@@ -1128,6 +1152,38 @@ async function handleChatImplementation(
   if (virtualCombo instanceof Response) return virtualCombo;
   combo = virtualCombo;
   if (combo) {
+    const managedFamilyRule = combo.config?.managedModelFamily;
+    if (managedFamilyRule && typeof managedFamilyRule === "object") {
+      const providers = Array.isArray((managedFamilyRule as ManagedModelFamilyRule).providers)
+        ? (managedFamilyRule as ManagedModelFamilyRule).providers
+        : [];
+      const catalogEntries = await Promise.all(
+        providers.map(async (provider) => {
+          const catalog = await getActiveSyncedCatalog(provider, false, false, true);
+          return [
+            provider,
+            {
+              authoritative: catalog.authoritative,
+              models: catalog.models.map((entry) => entry.id),
+            },
+          ] as const;
+        })
+      );
+      const catalogs: ManagedModelFamilyCatalogs = Object.fromEntries(catalogEntries);
+      const managedTargets = resolveManagedModelFamilyTargets(
+        managedFamilyRule as ManagedModelFamilyRule,
+        catalogs
+      );
+      combo = {
+        ...combo,
+        config: { ...combo.config, strictModelRouting: true },
+        models: managedTargets.map((model, index) => ({
+          id: `managed-family-${index}`,
+          kind: "model",
+          model,
+        })),
+      };
+    }
     if (reasoningDecision) {
       const filtered = filterReasoningCombo(combo, reasoningDecision);
       if (filtered instanceof Response) return filtered;
@@ -1144,6 +1200,7 @@ async function handleChatImplementation(
       `Combo "${modelStr}" [${combo.strategy || "priority"}] with ${combo.models.length} models`
     );
 
+    const strictModelRouting = combo.config?.strictModelRouting === true;
     // Pre-check function used by combo routing. A live-test marker may skip
     // availability only after target authorization succeeds.
     const comboPreselectedCredentials = new Map<string, any>();
@@ -1179,7 +1236,10 @@ async function handleChatImplementation(
       // target specifies providerId: "opengate" for credential lookup).
       let modelInfo;
       try {
-        modelInfo = await getModelInfo(modelString);
+        modelInfo = await getModelInfo(
+          modelString,
+          strictModelRouting ? { preserveExactTarget: true } : undefined
+        );
       } catch (error) {
         // Persisted explicit combos may still reference the retired provider. Treat
         // that target as unavailable so priority/fallback strategies can continue.
@@ -1321,6 +1381,7 @@ async function handleChatImplementation(
             conversationId,
             modelPinned: (target as any)?.modelPinned ?? false,
             reasoningTransportFallback,
+            strictModelRouting: strictModelRouting || target?.strictModelRouting === true,
             reasoningDecision,
             reasoningIntent,
             reasoningRequestTags: requestRoutingTags.tags,
@@ -1342,7 +1403,7 @@ async function handleChatImplementation(
           true
         ).then(async (res: Response) => {
           // Auto-promote the winning combo model to position #1 (opt-in flag).
-          if (res?.ok)
+          if (res?.ok && !strictModelRouting)
             await promoteSuccessfulComboModel(
               combo,
               m,
@@ -1371,6 +1432,7 @@ async function handleChatImplementation(
     // ── Global Fallback Provider (#689) ────────────────────────────────────
     // If combo exhausted all models, try the global fallback before giving up.
     if (
+      !strictModelRouting &&
       !response.ok &&
       [502, 503].includes(response.status) &&
       typeof (settings as any)?.globalFallbackModel === "string" &&
@@ -1551,6 +1613,7 @@ async function handleSingleModelChat(
     conversationId?: string | null;
     routingComboId?: string | null;
     modelPinned?: boolean;
+    strictModelRouting?: boolean;
     reasoningDecision?: ReasoningRuleDecision | null;
     reasoningIntent?: ExtractedReasoningIntent | null;
     reasoningRequestTags?: string[];
@@ -1582,7 +1645,8 @@ async function handleSingleModelChat(
     modelStr,
     body,
     clientRawRequest?.endpoint,
-    clientRawRequest?.headers
+    clientRawRequest?.headers,
+    runtimeOptions.strictModelRouting === true
   );
   if (resolved.error) return resolved.error;
 
@@ -1649,6 +1713,10 @@ async function handleSingleModelChat(
             // #7360 follow-up — see the primary handleSingleModel closure above.
             modelAbortSignal: target?.modelAbortSignal ?? null,
             fallbackAttempts: target?.fallbackAttempts,
+            strictModelRouting:
+              runtimeOptions.strictModelRouting === true ||
+              redirectCombo.config?.strictModelRouting === true ||
+              resolvedTarget?.strictModelRouting === true,
           },
           resolvedTarget?.effectiveComboStrategy ?? redirectCombo.strategy ?? "priority",
           false
@@ -2036,8 +2104,9 @@ async function handleSingleModelChat(
       // defaultModel, resolve the bare name to that real model ID before the
       // upstream call so the provider receives a concrete model rather than the
       // placeholder. A "/"-qualified model name is always left untouched.
-      let effectiveModel =
-        resolveBareModelToConnectionDefault(modelStr, model, credentials.defaultModel) ?? model;
+      let effectiveModel = runtimeOptions.strictModelRouting
+        ? model
+        : (resolveBareModelToConnectionDefault(modelStr, model, credentials.defaultModel) ?? model);
       let requestBody =
         effectiveModel !== model ? { ...body, model: `${provider}/${effectiveModel}` } : body;
       // If the combo explicitly overrode the provider to a passthrough provider, we
@@ -2172,6 +2241,7 @@ async function handleSingleModelChat(
             body: requestBody,
             provider,
             model: effectiveModel,
+            strictModelRouting: runtimeOptions.strictModelRouting === true,
             refreshedCredentials,
             proxyInfo,
             appliedProxySink,
