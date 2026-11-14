@@ -135,6 +135,7 @@ const DEFAULT_COMBO_CONFIG = {
   maxGlobalAttempts: 30,
   nestedComboMode: "flatten",
   trackMetrics: true,
+  strictModelRouting: false,
   reasoningTokenBufferEnabled: true,
   manifestRouting: false,
   // Complexity-aware auto routing is always-on since #13386 — the
@@ -359,6 +360,9 @@ export function resolveComboConfig(
 
   return {
     ...merged,
+    // Strict routing is an explicit per-combo contract, never inherited from
+    // global or provider defaults where it could silently change other combos.
+    strictModelRouting: comboConfig.strictModelRouting === true,
     failoverBeforeRetryExplicit,
     shadowRouting: {
       ...DEFAULT_COMBO_CONFIG.shadowRouting,
@@ -400,6 +404,7 @@ export function resolveComboSetupConfig(combo: ComboConfigLike, settings: ComboS
   return {
     ...getDefaultComboConfig(),
     ...comboConfig,
+    strictModelRouting: comboConfig.strictModelRouting === true,
     // See resolveComboConfig's failoverBeforeRetryExplicit comment — same
     // distinction applies here (no `settings`, so only the combo's own config
     // can opt in).

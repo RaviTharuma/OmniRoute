@@ -122,13 +122,17 @@ export async function resolveModelOrError(
   modelStr: string,
   body: any,
   endpointPath: string = "",
-  requestHeaders: Record<string, unknown> | null | undefined = null
+  requestHeaders: Record<string, unknown> | null | undefined = null,
+  strictModelRouting = false
 ) {
-  const modelInfo = await getModelInfoOrRetirementResponse(modelStr);
+  const modelInfo = strictModelRouting
+    ? await getModelInfo(modelStr, { preserveExactTarget: true })
+    : await getModelInfoOrRetirementResponse(modelStr);
   if ("error" in modelInfo) return modelInfo;
   const sourceFormat = detectFormatFromEndpoint(body, endpointPath);
 
   if (
+    !strictModelRouting &&
     modelInfo.provider === "openai" &&
     typeof modelInfo.model === "string" &&
     CODEX_NATIVE_RESPONSES_MODELS.has(modelInfo.model) &&
@@ -140,6 +144,7 @@ export async function resolveModelOrError(
   }
 
   if (
+    !strictModelRouting &&
     modelInfo.provider === "openai" &&
     modelInfo.model === "gpt-5.5" &&
     sourceFormat === "openai-responses" &&
@@ -162,6 +167,7 @@ export async function resolveModelOrError(
   // Ambiguous candidates (e.g. deepseek-v4-pro lives on both ds + opencode-go)
   // resolve to the model-family's native provider via NON_OAUTH_PROVIDER_BY_FAMILY.
   if (
+    !strictModelRouting &&
     modelInfo.provider === "codex" &&
     typeof modelInfo.model === "string" &&
     NON_OAUTH_MODEL_PREFIX.test(modelInfo.model)
@@ -463,6 +469,7 @@ export async function executeChatWithBreaker({
   correlationId = null,
   conversationId = null,
   modelPinned = false,
+  strictModelRouting = false,
   routingComboId = null,
   reasoningTransportFallback = "drop",
   sessionAffinityKey = null,
@@ -542,6 +549,7 @@ export async function executeChatWithBreaker({
             correlationId,
             conversationId,
             modelPinned,
+            strictModelRouting,
             routingComboId,
             sessionAffinityKey,
             reasoningTransportFallback,

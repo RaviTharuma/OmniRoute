@@ -232,6 +232,7 @@ export type ResolvedComboTarget = {
   allowedConnectionIds?: string[] | null;
   weight: number;
   label: string | null;
+  strictModelRouting?: boolean;
   prompt?: string | null;
   failoverBeforeRetry?: unknown;
   fallbackOnlyOnQuotaExhaustion?: boolean;
@@ -262,6 +263,7 @@ export type ResolvedComboRefTarget = {
   weight: number;
   label: string | null;
   fallbackOnlyOnQuotaExhaustion?: boolean;
+  strictModelRouting?: boolean;
 };
 
 export type ResolvedComboUnit = ResolvedComboTarget | ResolvedComboRefTarget;

@@ -284,6 +284,7 @@ function expandRuntimeStep(
   const nestedCombo = combos.find((combo) => combo.name === step.comboName);
   if (!nestedCombo || visited.has(step.comboName)) return [];
 
+  const inheritedStrict = nestedCombo.config?.strictModelRouting === true;
   return resolveNestedComboTargets(
     nestedCombo,
     combos,
@@ -291,7 +292,7 @@ function expandRuntimeStep(
     depth + 1,
     [...path, step.stepId],
     maxDepth
-  );
+  ).map((target) => (inheritedStrict ? { ...target, strictModelRouting: true } : target));
 }
 
 export function resolveNestedComboTargets(
@@ -962,12 +963,14 @@ export function resolveComboTargets(
   maxDepth: number = MAX_COMBO_DEPTH,
   hiddenModelsByProvider: HiddenModelsByProvider = getHiddenModelsByProvider()
 ): ResolvedComboTarget[] {
+  const strictRoot = combo.config?.strictModelRouting === true;
+  const targets = allCombos
+    ? resolveNestedComboTargets(combo, allCombos, new Set<string>(), 0, [], maxDepth)
+    : getOrderedTopLevelRuntimeSteps(combo, null).filter(
+        (entry): entry is ResolvedComboTarget => entry?.kind === "model"
+      );
   return filterVisibleComboTargets(
-    allCombos
-      ? resolveNestedComboTargets(combo, allCombos, new Set<string>(), 0, [], maxDepth)
-      : getOrderedTopLevelRuntimeSteps(combo, null).filter(
-          (entry): entry is ResolvedComboTarget => entry?.kind === "model"
-        ),
+    strictRoot ? targets.map((target) => ({ ...target, strictModelRouting: true })) : targets,
     hiddenModelsByProvider
   );
 }
@@ -982,9 +985,12 @@ export function resolveComboRuntimeUnits(
   if (mode === "flatten" || !allCombos)
     return resolveComboTargets(combo, allCombos, maxDepth, hiddenModelsByProvider);
   validateComboDAG(combo.name, allCombos, new Set<string>(), 0, maxDepth);
-  return getOrderedTopLevelRuntimeSteps(combo, allCombos).filter(
-    (unit) => unit.kind === "combo-ref" || isComboTargetVisible(unit, hiddenModelsByProvider)
-  );
+  const strictRoot = combo.config?.strictModelRouting === true;
+  return getOrderedTopLevelRuntimeSteps(combo, allCombos)
+    .filter(
+      (unit) => unit.kind === "combo-ref" || isComboTargetVisible(unit, hiddenModelsByProvider)
+    )
+    .map((unit) => (strictRoot ? { ...unit, strictModelRouting: true } : unit));
 }
 
 export function resolveWeightedStepGroups(
@@ -992,18 +998,24 @@ export function resolveWeightedStepGroups(
   allCombos: ComboCollectionLike,
   hiddenModelsByProvider: HiddenModelsByProvider = getHiddenModelsByProvider()
 ): Array<{ step: ComboRuntimeStep; targets: ResolvedComboTarget[] }> {
+  const strictRoot = combo.config?.strictModelRouting === true;
   return getOrderedTopLevelRuntimeSteps(combo, allCombos)
-    .map((step) => ({
-      step,
-      targets: filterVisibleComboTargets(
+    .map((step) => {
+      const targets = filterVisibleComboTargets(
         !allCombos
           ? step.kind === "model"
             ? [step]
             : []
           : expandRuntimeStep(step, allCombos, new Set([combo.name])),
         hiddenModelsByProvider
-      ),
-    }))
+      );
+      return {
+        step: strictRoot ? { ...step, strictModelRouting: true } : step,
+        targets: strictRoot
+          ? targets.map((target) => ({ ...target, strictModelRouting: true }))
+          : targets,
+      };
+    })
     .filter((group) => group.targets.length > 0);
 }
 

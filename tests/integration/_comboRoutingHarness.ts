@@ -77,7 +77,7 @@ export async function createComboRoutingHarness(prefix: string) {
         index: calls.length,
         provider,
         url: u,
-        authorization: headers.authorization,
+        authorization: headers.authorization ?? headers["x-api-key"],
         model: readModel(init),
       };
       calls.push(call);

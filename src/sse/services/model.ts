@@ -527,7 +527,7 @@ function stripRedundantNodeRoutingSegments(model: string, routingIds: unknown[])
 /**
  * Get full model info (parse or resolve)
  */
-export async function getModelInfo(modelStr) {
+export async function getModelInfo(modelStr, options?: { preserveExactTarget?: boolean }) {
   // Reject the raw common-provider identity before compatible-node lookup or
   // stripModelPrefix can erase/remap it. Ordinary bare model aliases remain
   // operator-owned; the two retired bare ids are intentionally blocked.
@@ -642,20 +642,22 @@ export async function getModelInfo(modelStr) {
       }
     }
 
-    // stripModelPrefix: if enabled, strip provider prefix and re-resolve
-    // the bare model name using existing heuristics (claude-* → anthropic, etc.)
-    try {
-      const settings = await getCachedSettings();
-      if (settings.stripModelPrefix === true) {
-        const strippedResult = await getModelInfoCore(parsed.model, getCombinedModelAliases);
-        return assertResolvedModelAvailable({ ...strippedResult, extendedContext });
+    // Strict combo targets already name their concrete provider/model identity.
+    // Do not let deployment-wide prefix stripping reinterpret that identity.
+    if (options?.preserveExactTarget !== true) {
+      try {
+        const settings = await getCachedSettings();
+        if (settings.stripModelPrefix === true) {
+          const strippedResult = await getModelInfoCore(parsed.model, getCombinedModelAliases);
+          return assertResolvedModelAvailable({ ...strippedResult, extendedContext });
+        }
+      } catch {
+        // If settings read fails, fall through to normal resolution
       }
-    } catch {
-      // If settings read fails, fall through to normal resolution
     }
   }
 
-  if (!parsed.isAlias) {
+  if (options?.preserveExactTarget === true || !parsed.isAlias) {
     return await attachRuntimeModelMeta(await getModelInfoCore(modelStr, null));
   }
 

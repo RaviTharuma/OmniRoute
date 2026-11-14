@@ -217,6 +217,8 @@ export type ExecuteInput = {
   skipUpstreamRetry?: boolean;
   /** In-process capability; never accepted from an HTTP body or client header. */
   validationDispatch?: StrictValidationDispatch;
+  /** Disable executor-level model aliases or fallback chains for strict combo targets. */
+  strictModelRouting?: boolean;
   /** Request-scoped id for log attribution; absent off the chat path, never fabricated. */
   correlationId?: string | null;
   /** Delegated Context Editing (Claude only): when enabled, attach the

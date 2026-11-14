@@ -537,6 +537,7 @@ async function applyContinuityFilters(
   // preserving the #3825 prompt-cache/504 fix). When disabled, skip the reorder and
   // treat the result as a no-op so the recordStickyBinding write-back below is skipped.
   const disableSessionStickiness =
+    config.strictModelRouting === true ||
     cacheStrategyAffinityApplied ||
     resolveDisableSessionStickiness(
       config as Record<string, unknown> | null | undefined,
@@ -566,7 +567,7 @@ async function applyContinuityFilters(
         { respectDeclaredOrder: traits.stickinessRespectsDeclaredOrder }
       );
   let orderedTargets = sticky.targets;
-  if (!cacheStrategyAffinityApplied) {
+  if (!cacheStrategyAffinityApplied && config.strictModelRouting !== true) {
     orderedTargets = orderTargetsByEvalScores(orderedTargets, config.evalRouting, log);
   }
   // #8488 / #8494: fail closed when hard capability filters empty the pool.
@@ -916,13 +917,21 @@ export async function resolveComboTargetPipeline(
     quotaShareRelease?.();
     return continuity;
   }
-  orderedTargets = applyTaskAwareOrdering(deps, continuity.orderedTargets, autoUsedExplicitRouter);
-  orderedTargets = await applyPromptCacheStage(
-    deps,
-    orderedTargets,
-    continuity.sticky.stuck,
-    autoUsedExplicitRouter
-  );
+  if (config.strictModelRouting !== true) {
+    orderedTargets = applyTaskAwareOrdering(
+      deps,
+      continuity.orderedTargets,
+      autoUsedExplicitRouter
+    );
+    orderedTargets = await applyPromptCacheStage(
+      deps,
+      orderedTargets,
+      continuity.sticky.stuck,
+      autoUsedExplicitRouter
+    );
+  } else {
+    orderedTargets = continuity.orderedTargets;
+  }
 
   quotaShareRelease = transferInflightReservation(
     traits.inflightReservation,

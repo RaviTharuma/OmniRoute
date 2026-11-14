@@ -1,0 +1,1 @@
+- **fix(auto-combo):** strict combos preserve exact model identities across provider failover, nested wrappers, streaming recovery, and catalog-driven family/latest routing without implicit version downgrades

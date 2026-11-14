@@ -840,7 +840,7 @@ async function handleComboChatInner({
   // falls through to the target iteration loop below. Implementations live in
   // combo/dispatchPrelude.ts; only the chaos + round-robin hand-offs are short
   // enough to stay inline.
-  if (pinnedModel) {
+  if (pinnedModel && config.strictModelRouting !== true) {
     const pinnedDispatch = await tryPinnedModelDispatch({
       body,
       combo,

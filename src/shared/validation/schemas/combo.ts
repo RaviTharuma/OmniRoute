@@ -167,9 +167,26 @@ export const responseValidationSchema = z
   })
   .strict();
 
+export const managedModelFamilySchema = z
+  .object({
+    family: z.string().trim().min(1).max(100),
+    mode: z.enum(["latest", "exact"]),
+    providers: z.array(z.string().trim().min(1).max(100)).min(1).max(20),
+    version: z.string().trim().min(1).max(50).optional(),
+  })
+  .strict()
+  .refine((rule) => rule.mode !== "exact" || Boolean(rule.version), {
+    message: "version is required for exact managed model-family routing",
+    path: ["version"],
+  });
+
 export const comboRuntimeConfigSchema = z
   .object({
     responseValidation: responseValidationSchema.optional(),
+    // Fail closed: the declared combo target sequence is the only authority allowed
+    // to change models. Provider/account retries for the current target remain enabled.
+    strictModelRouting: z.boolean().optional(),
+    managedModelFamily: managedModelFamilySchema.optional(),
     strategy: comboStrategySchema.optional(),
     maxRetries: z.coerce.number().int().min(0).max(10).optional(),
     retryDelayMs: z.coerce.number().int().min(0).max(60000).optional(),
@@ -397,7 +414,7 @@ export const createComboSchema = z
     // Optional label advertised as `display_name` in /v1/models. Lets a combo
     // carry a machine-oriented name while clients show something readable.
     displayName: z.string().trim().max(200).optional(),
-    models: z.array(comboModelEntry).min(1, "a combo requires at least one model"),
+    models: z.array(comboModelEntry),
     strategy: comboStrategySchema.optional().default("priority"),
     config: comboRuntimeConfigSchema.optional(),
     universal_handoff: universalHandoffSchema.optional(),
@@ -421,7 +438,16 @@ export const createComboSchema = z
       .optional()
       .nullable(),
   })
-  .superRefine(validateQuotaOnlyComboRefs);
+  .superRefine((combo, ctx) => {
+    validateQuotaOnlyComboRefs(combo, ctx);
+    if (combo.models.length === 0 && !combo.config?.managedModelFamily) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "a combo requires at least one model or a managed model-family rule",
+        path: ["models"],
+      });
+    }
+  });
 
 export const updateComboDefaultsSchema = z
   .object({
