@@ -427,6 +427,14 @@ export async function getActiveSyncedCatalog(
   }
 }
 
+/** Fresh, active, discovery-only rows for catalog-managed routing policies. */
+export async function getFreshActiveDiscoveredCatalog(
+  providerId: string
+): Promise<ActiveSyncedCatalog> {
+  const catalog = await getActiveSyncedCatalog(providerId, false, false, true);
+  return { authoritative: catalog.models.length > 0, models: catalog.models };
+}
+
 /**
  * Return non-empty synced catalogs grouped by provider, restricted to active
  * connections. This is the authoritative live source for /v1/models.

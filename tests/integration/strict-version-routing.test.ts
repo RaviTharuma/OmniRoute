@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { clearAllModelLockouts } from "../../open-sse/services/accountFallback.ts";
+import { setCustomAliases } from "../../open-sse/services/modelDeprecation.ts";
 
 import { createComboRoutingHarness } from "./_comboRoutingHarness.ts";
 
@@ -98,15 +99,37 @@ function claudeSuccessStream(text: string, model = EXACT_MODEL): Response {
   );
 }
 
+function deferredClaudeResponse(text: string, model: string) {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const response = async () => {
+    await promise;
+    return new Response(
+      JSON.stringify({
+        id: `msg_${model}`,
+        type: "message",
+        role: "assistant",
+        model,
+        content: [{ type: "text", text }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 4, output_tokens: 3 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+  return { response, release: resolve };
+}
+
 test.beforeEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = 0;
   process.env.STREAM_READINESS_STALL_RETRY = "false";
   process.env.STREAM_EARLY_EOF_SIBLING_FAILOVER_ENABLED = "false";
+  setCustomAliases({});
   await resetStorage();
 });
 
 test.afterEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = h.originalRetryDelayMs;
+  setCustomAliases({});
   await resetStorage();
 });
 
@@ -145,6 +168,109 @@ test("GET /api/combos advertises strict routing and returns its persisted config
       ?.strictModelRouting,
     true
   );
+});
+
+test("strict and nonstrict requests never share an inflight response across effective models", async () => {
+  const deprecatedModel = "claude-dedup-deprecated";
+  const replacementModel = "claude-dedup-current";
+  const connection = await seedConnection("claude", {
+    name: "strict-dedup-identity",
+    apiKey: "sk-test-strict-dedup-identity",
+  });
+  setCustomAliases({ [deprecatedModel]: replacementModel });
+  await combosDb.createCombo({
+    name: "strict-dedup-exact",
+    strategy: "priority",
+    config: { strictModelRouting: true, maxRetries: 0, retryDelayMs: 0 },
+    models: [modelStep("strict-dedup-model", "claude", deprecatedModel, connection.id)],
+  });
+
+  const strictUpstream = deferredClaudeResponse("strict exact response", deprecatedModel);
+  const nonstrictUpstream = deferredClaudeResponse(
+    "nonstrict replacement response",
+    replacementModel
+  );
+  h.installRecordingFetch((call) =>
+    call.model === deprecatedModel ? strictUpstream.response() : nonstrictUpstream.response()
+  );
+  const messages = [{ role: "user", content: "Do not share this inflight response." }];
+  const nonstrictPending = handleChat(
+    buildRequest({
+      body: { model: `claude/${deprecatedModel}`, stream: false, temperature: 0, messages },
+    })
+  );
+  const strictPending = handleChat(
+    buildRequest({
+      body: { model: "strict-dedup-exact", stream: false, temperature: 0, messages },
+    })
+  );
+  await h.waitFor(() => h.calls.length > 0);
+  strictUpstream.release();
+  nonstrictUpstream.release();
+  const [nonstrictResponse, strictResponse] = await Promise.all([nonstrictPending, strictPending]);
+  const [nonstrictBody, strictBody] = await Promise.all([
+    nonstrictResponse.json() as Promise<{ choices: Array<{ message: { content: string } }> }>,
+    strictResponse.json() as Promise<{ choices: Array<{ message: { content: string } }> }>,
+  ]);
+
+  assert.equal(nonstrictResponse.status, 200);
+  assert.equal(strictResponse.status, 200);
+  assert.deepEqual(
+    h.calls.map((call) => call.model).sort(),
+    [replacementModel, deprecatedModel].sort()
+  );
+  assert.equal(nonstrictBody.choices[0].message.content, "nonstrict replacement response");
+  assert.equal(strictBody.choices[0].message.content, "strict exact response");
+});
+
+test("strict image request never follows a vision-bridge model reroute", async () => {
+  const exact = await seedConnection("deepseek", {
+    name: "strict-vision-exact",
+    apiKey: "sk-test-strict-vision-exact",
+  });
+  await seedConnection("openai", {
+    name: "strict-vision-bridge-target",
+    apiKey: "sk-test-strict-vision-bridge-target",
+  });
+  await settingsDb.updateSettings({
+    modalityBridgeVisionEnabled: true,
+    modalityBridgeVisionMode: "reroute",
+    modalityBridgeVisionModel: "openai/gpt-4o-mini",
+    modalityBridgeCacheEnabled: false,
+  });
+  await combosDb.createCombo({
+    name: "strict-no-vision-combo",
+    strategy: "priority",
+    config: { strictModelRouting: true, maxRetries: 0, retryDelayMs: 0 },
+    models: [modelStep("strict-no-vision", "deepseek", "deepseek-chat", exact.id)],
+  });
+
+  h.installRecordingFetch();
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "strict-no-vision-combo",
+        stream: false,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Describe this image without changing models." },
+              {
+                type: "image_url",
+                image_url: {
+                  url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    })
+  );
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(h.calls, [], "vision bridge must not dispatch a different model");
 });
 
 test("strict exact routing keeps claude-opus-5-5 while failing over between providers", async () => {

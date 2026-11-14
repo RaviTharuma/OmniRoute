@@ -414,7 +414,7 @@ export const createComboSchema = z
     // Optional label advertised as `display_name` in /v1/models. Lets a combo
     // carry a machine-oriented name while clients show something readable.
     displayName: z.string().trim().max(200).optional(),
-    models: z.array(comboModelEntry).min(1, "a combo requires at least one model"),
+    models: z.array(comboModelEntry),
     strategy: comboStrategySchema.optional().default("priority"),
     config: comboRuntimeConfigSchema.optional(),
     universal_handoff: universalHandoffSchema.optional(),
@@ -438,7 +438,16 @@ export const createComboSchema = z
       .optional()
       .nullable(),
   })
-  .superRefine(validateQuotaOnlyComboRefs);
+  .superRefine((combo, ctx) => {
+    validateQuotaOnlyComboRefs(combo, ctx);
+    if (combo.models.length === 0 && !combo.config?.managedModelFamily) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "a combo requires at least one model or a managed model-family rule",
+        path: ["models"],
+      });
+    }
+  });
 
 export const updateComboDefaultsSchema = z
   .object({

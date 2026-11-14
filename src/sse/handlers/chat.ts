@@ -94,7 +94,7 @@ import { evaluateComboTargetPreflight } from "./chat/comboTargetKeyPolicy.ts";
 import * as resolvedPolicy from "./chat/resolvedModelPolicy.ts";
 import { recordGateRejection, recordQuotaParkedSkip } from "./quotaParkedSkipUsage";
 import { getCombos } from "@/lib/db/combos";
-import { getActiveSyncedCatalog } from "@/lib/db/models/activeSyncedCatalog";
+import { getFreshActiveDiscoveredCatalog } from "@/lib/db/models/activeSyncedCatalog";
 import { resolveModelLockoutSettings } from "@/lib/resilience/modelLockoutSettings";
 import {
   ensureOpenAIStoreSessionFallback,
@@ -909,6 +909,16 @@ async function handleChatImplementation(
     ).input;
   }
 
+  // Resolve strict policy from the original requested model before any guardrail
+  // can rewrite payload.model. Strict targets may transform content, but never identity.
+  const requestedCombo = await getComboForModel(modelStr);
+  const requestedConfig = requestedCombo?.config as
+    { strictModelRouting?: boolean; managedModelFamily?: unknown } | null | undefined;
+  const strictRequestedCombo =
+    requestedConfig?.strictModelRouting === true || requestedConfig?.managedModelFamily
+      ? requestedCombo
+      : null;
+
   // Guardrail pre-call pipeline — prompt injection, PII masking, and future custom rules.
   telemetry.startPhase("validate");
   const preCallGuardrails = await guardrailRegistry.runPreCallHooks(body, {
@@ -946,19 +956,23 @@ async function handleChatImplementation(
       }
     );
   }
-  // Snapshot model BEFORE the guardrail payload (see reconcileGuardrailReroute).
+  // Snapshot model BEFORE applying the transformed guardrail payload.
   const modelBeforeGuardrails =
     typeof body?.model === "string" && body.model.length > 0 ? body.model : modelStr;
   body = preCallGuardrails.payload;
-  ({ body, modelStr } = await RoutingModelOps.reconcileGuardrailReroute({
-    body,
-    modelBeforeGuardrails,
-    modelStr,
-    apiKey,
-    apiKeyId: apiKeyInfo?.id,
-    isModelAllowedForKey,
-    log,
-  }));
+  if (strictRequestedCombo) {
+    body = RoutingModelOps.align(body, modelStr, log);
+  } else {
+    ({ body, modelStr } = await RoutingModelOps.reconcileGuardrailReroute({
+      body,
+      modelBeforeGuardrails,
+      modelStr,
+      apiKey,
+      apiKeyId: apiKeyInfo?.id,
+      isModelAllowedForKey,
+      log,
+    }));
+  }
   // Modality Bridge transparency (Task 9): non-null only when a pre-call bridge
   // guardrail transformed the payload (describe path) — stamped on the main
   // success exits below via withModalityBridgeHeader().
@@ -1012,15 +1026,6 @@ async function handleChatImplementation(
       registerKeySession(apiKeyInfo.id, sessionId);
     }
   }
-
-  // Resolve an explicitly strict stored combo before any automatic router can
-  // replace its model. Its declared target sequence remains the sole authority.
-  const requestedCombo = await getComboForModel(modelStr);
-  const strictRequestedCombo =
-    requestedCombo?.config?.strictModelRouting === true ||
-    requestedCombo?.config?.managedModelFamily
-      ? requestedCombo
-      : null;
 
   // T09 — Pre-request Middleware Hooks
   // Execute user-defined hooks BEFORE task-aware routing and combo selection
@@ -1159,7 +1164,7 @@ async function handleChatImplementation(
         : [];
       const catalogEntries = await Promise.all(
         providers.map(async (provider) => {
-          const catalog = await getActiveSyncedCatalog(provider, false, false, true);
+          const catalog = await getFreshActiveDiscoveredCatalog(provider);
           return [
             provider,
             {
@@ -1347,6 +1352,7 @@ async function handleChatImplementation(
           effectiveComboStrategy?: string | null;
           modelAbortSignal?: AbortSignal | null;
           fallbackAttempts?: number;
+          strictModelRouting?: boolean;
         }
       ) =>
         handleSingleModelChat(

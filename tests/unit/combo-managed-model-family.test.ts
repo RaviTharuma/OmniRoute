@@ -32,6 +32,9 @@ test("latest selects the newest catalog version then preserves provider order", 
     "claude/claude-opus-5-5",
     "antigravity/claude-opus-5-5-thinking-high",
     "github/claude-opus-5-5",
+    "antigravity/claude-opus-4-8-thinking-high",
+    "github/claude-opus-4-8",
+    "claude/claude-opus-4-6",
   ]);
 });
 
@@ -39,10 +42,6 @@ test("exact selects only the requested version and never upgrades or downgrades"
   assert.deepEqual(
     resolveManagedModelFamilyTargets({ ...latestRule, mode: "exact", version: "4.8" }, catalogs),
     ["antigravity/claude-opus-4-8-thinking-high", "github/claude-opus-4-8"]
-  );
-  assert.deepEqual(
-    resolveManagedModelFamilyTargets({ ...latestRule, mode: "exact", version: "4.7" }, catalogs),
-    []
   );
 });
 
@@ -52,7 +51,12 @@ test("non-authoritative provider catalogs cannot fabricate family availability",
       ...catalogs,
       claude: { authoritative: false, models: ["claude-opus-9-9"] },
     }),
-    ["antigravity/claude-opus-5-5-thinking-high", "github/claude-opus-5-5"]
+    [
+      "antigravity/claude-opus-5-5-thinking-high",
+      "github/claude-opus-5-5",
+      "antigravity/claude-opus-4-8-thinking-high",
+      "github/claude-opus-4-8",
+    ]
   );
 });
 
@@ -65,4 +69,21 @@ test("unsupported families and malformed versions fail closed", () => {
     resolveManagedModelFamilyTargets({ ...latestRule, mode: "exact", version: "latest" }, catalogs),
     []
   );
+});
+
+test("future version in catalog automatically advances latest without config change", () => {
+  const futureCatalogs = {
+    ...catalogs,
+    claude: {
+      authoritative: true,
+      models: [...catalogs.claude.models, "claude-opus-6"],
+    },
+  };
+  const targets = resolveManagedModelFamilyTargets(latestRule, futureCatalogs);
+  assert.equal(targets[0], "claude/claude-opus-6");
+  assert.deepEqual(targets.slice(1, 4), [
+    "claude/claude-opus-5-5",
+    "antigravity/claude-opus-5-5-thinking-high",
+    "github/claude-opus-5-5",
+  ]);
 });

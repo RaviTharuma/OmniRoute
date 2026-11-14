@@ -64,19 +64,21 @@ export function resolveManagedModelFamilyTargets(
   }
   if (candidates.length === 0) return [];
 
-  const selectedVersion =
-    exactVersion ??
-    candidates
-      .map((candidate) => candidate.version)
-      .sort(compareVersions)
-      .at(-1);
-  if (!selectedVersion) return [];
+  const selectedVersions = exactVersion
+    ? [exactVersion]
+    : Array.from(
+        new Map(
+          candidates.map((candidate) => [candidate.version.join("."), candidate.version] as const)
+        ).values()
+      ).sort((left, right) => compareVersions(right, left));
 
-  return rule.providers.flatMap((provider) => {
-    const candidate = candidates.find(
-      (entry) =>
-        entry.provider === provider && compareVersions(entry.version, selectedVersion) === 0
-    );
-    return candidate ? [`${provider}/${candidate.model}`] : [];
-  });
+  return selectedVersions.flatMap((selectedVersion) =>
+    rule.providers.flatMap((provider) => {
+      const candidate = candidates.find(
+        (entry) =>
+          entry.provider === provider && compareVersions(entry.version, selectedVersion) === 0
+      );
+      return candidate ? [`${provider}/${candidate.model}`] : [];
+    })
+  );
 }

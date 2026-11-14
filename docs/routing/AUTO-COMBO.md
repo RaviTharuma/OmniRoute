@@ -365,13 +365,14 @@ exact request to another version. Example:
       "providers": ["claude", "antigravity", "github"]
     }
   },
-  "models": [{ "kind": "model", "model": "claude/claude-opus-placeholder" }]
+  "models": []
 }
 ```
 
-The persisted placeholder only satisfies the combo storage contract; it is never dispatched.
-At request time the managed rule replaces it with catalog-proven concrete targets and enables
-strict routing for the resulting sequence. Unrelated combos and model aliases are unchanged.
+A managed model family combo does not require manual model entries in storage.
+At request time the managed rule derives catalog-proven concrete targets, ordered version-first
+and provider-first, and enables strict routing for the resulting sequence.
+Unrelated combos and model aliases are unchanged.
 
 ### `weighted` semantics
 

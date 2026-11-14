@@ -2434,7 +2434,12 @@ async function handleChatCoreInner({
     allowCompletedToolHandoffGrace: isCodexResponsesEcho,
   });
 
-  const dedupRequestBody = { ...translatedBody, model: `${provider}/${model}`, stream };
+  const dedupRequestBody = {
+    ...translatedBody,
+    model: `${provider}/${effectiveModel}`,
+    stream,
+    ...(strictModelRouting ? { _omnirouteStrictModelRouting: true } : {}),
+  };
   const dedupEnabled = shouldDeduplicate(dedupRequestBody);
   // Namespaced by the calling API key: dedup hands the SAME response object to
   // every joiner, so a shared hash across keys is a cross-principal response
